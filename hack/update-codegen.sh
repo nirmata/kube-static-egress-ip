@@ -28,7 +28,7 @@ CODEGEN_PKG=${CODEGEN_PKG:-$(cd ${SCRIPT_ROOT}; ls -d -1 ./vendor/k8s.io/code-ge
 ${CODEGEN_PKG}/generate-groups.sh "deepcopy,client,informer,lister" \
   github.com/nirmata/kube-static-egress-ip/pkg/client github.com/nirmata/kube-static-egress-ip/pkg/apis \
   egressip:v1alpha1 \
-  --output-base "$(dirname ${BASH_SOURCE})/../../.." \
+  --output-base "$(dirname ${BASH_SOURCE})/../../../.." \
   --go-header-file ${SCRIPT_ROOT}/hack/boilerplate.go.txt
 
 # To use your own boilerplate text use:
