@@ -1,0 +1,68 @@
+---
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    kubeless: kinesis-trigger-controller
+  name: kinesis-trigger-controller
+  namespace: kubeless
+spec:
+  selector:
+    matchLabels:
+      kubeless: kinesis-trigger-controller
+  template:
+    metadata:
+      labels:
+        kubeless: kinesis-trigger-controller
+    spec:
+      containers:
+      - env:
+        - name: KUBELESS_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: KUBELESS_CONFIG
+          value: kubeless-config
+        image: bitnami/kinesis-trigger-controller:latest
+        imagePullPolicy: IfNotPresent
+        name: kinesis-trigger-controller
+      serviceAccountName: controller-acct
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: kinesis-controller-deployer
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - configmaps
+  - secrets
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - kubeless.io
+  resources:
+  - functions
+  - kinesistriggers
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: kinesis-controller-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kinesis-controller-deployer
+subjects:
+- kind: ServiceAccount
+  name: controller-acct
+  namespace: kubeless
