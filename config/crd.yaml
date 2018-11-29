@@ -1,12 +1,12 @@
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
-  name: staticegressip.nirmata.io
+  name: staticegressips.staticegressips.nirmata.io
 spec:
-  group: nirmata.io
+  group: staticegressips.nirmata.io
   names:
     kind: StaticEgressIP
-    plural: StaticEgressIPs
-    singular: StaticEgressIP
+    plural: staticegressips
+    singular: staticegressip
   scope: Namespaced
-  version: v1beta1
+  version: v1alpha1
