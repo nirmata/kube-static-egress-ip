@@ -1,0 +1,8 @@
+apiVersion: staticegressips.nirmata.io/v1alpha1
+kind: StaticEgressIP
+metadata:
+  name: test
+spec:
+  rules:
+  - address: 10.1.1.1
+    service-name: test

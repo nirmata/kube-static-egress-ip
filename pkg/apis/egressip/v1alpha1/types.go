@@ -34,6 +34,12 @@ type StaticEgressIP struct {
 
 // StaticEgressIPSpec is the spec for a StaticEgressIP resource
 type StaticEgressIPSpec struct {
+	Rules []Rule `json:"rules"`
+}
+
+type Rule struct {
+	ServiceName string `json:"service-name"`
+	Address     string `json:"address"`
 }
 
 // StaticEgressIPStatus is the status for a StaticEgressIP resource
