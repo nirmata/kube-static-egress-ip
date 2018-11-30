@@ -1,5 +1,5 @@
 /*
-Copyright The Kubernetes Authors.
+Copyright 2017 Nirmata inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,22 +25,22 @@ import (
 	rest "k8s.io/client-go/rest"
 )
 
-type SamplecontrollerV1alpha1Interface interface {
+type StaticegressipsV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	StaticEgressIPsGetter
 }
 
-// SamplecontrollerV1alpha1Client is used to interact with features provided by the samplecontroller.k8s.io group.
-type SamplecontrollerV1alpha1Client struct {
+// StaticegressipsV1alpha1Client is used to interact with features provided by the staticegressips.nirmata.io group.
+type StaticegressipsV1alpha1Client struct {
 	restClient rest.Interface
 }
 
-func (c *SamplecontrollerV1alpha1Client) StaticEgressIPs(namespace string) StaticEgressIPInterface {
+func (c *StaticegressipsV1alpha1Client) StaticEgressIPs(namespace string) StaticEgressIPInterface {
 	return newStaticEgressIPs(c, namespace)
 }
 
-// NewForConfig creates a new SamplecontrollerV1alpha1Client for the given config.
-func NewForConfig(c *rest.Config) (*SamplecontrollerV1alpha1Client, error) {
+// NewForConfig creates a new StaticegressipsV1alpha1Client for the given config.
+func NewForConfig(c *rest.Config) (*StaticegressipsV1alpha1Client, error) {
 	config := *c
 	if err := setConfigDefaults(&config); err != nil {
 		return nil, err
@@ -49,12 +49,12 @@ func NewForConfig(c *rest.Config) (*SamplecontrollerV1alpha1Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SamplecontrollerV1alpha1Client{client}, nil
+	return &StaticegressipsV1alpha1Client{client}, nil
 }
 
-// NewForConfigOrDie creates a new SamplecontrollerV1alpha1Client for the given config and
+// NewForConfigOrDie creates a new StaticegressipsV1alpha1Client for the given config and
 // panics if there is an error in the config.
-func NewForConfigOrDie(c *rest.Config) *SamplecontrollerV1alpha1Client {
+func NewForConfigOrDie(c *rest.Config) *StaticegressipsV1alpha1Client {
 	client, err := NewForConfig(c)
 	if err != nil {
 		panic(err)
@@ -62,9 +62,9 @@ func NewForConfigOrDie(c *rest.Config) *SamplecontrollerV1alpha1Client {
 	return client
 }
 
-// New creates a new SamplecontrollerV1alpha1Client for the given RESTClient.
-func New(c rest.Interface) *SamplecontrollerV1alpha1Client {
-	return &SamplecontrollerV1alpha1Client{c}
+// New creates a new StaticegressipsV1alpha1Client for the given RESTClient.
+func New(c rest.Interface) *StaticegressipsV1alpha1Client {
+	return &StaticegressipsV1alpha1Client{c}
 }
 
 func setConfigDefaults(config *rest.Config) error {
@@ -82,7 +82,7 @@ func setConfigDefaults(config *rest.Config) error {
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *SamplecontrollerV1alpha1Client) RESTClient() rest.Interface {
+func (c *StaticegressipsV1alpha1Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}

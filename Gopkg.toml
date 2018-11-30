@@ -15,3 +15,7 @@ required = [
 [[constraint]]
   name = "k8s.io/client-go"
   version = "kubernetes-1.12.3"
+
+[[constraint]]
+  name = "github.com/golang/glog"
+  branch = "master"

@@ -1,5 +1,5 @@
 /*
-Copyright The Kubernetes Authors.
+Copyright 2017 Nirmata inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -172,9 +172,9 @@ type SharedInformerFactory interface {
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
-	Samplecontroller() egressip.Interface
+	Staticegressips() egressip.Interface
 }
 
-func (f *sharedInformerFactory) Samplecontroller() egressip.Interface {
+func (f *sharedInformerFactory) Staticegressips() egressip.Interface {
 	return egressip.New(f, f.namespace, f.tweakListOptions)
 }

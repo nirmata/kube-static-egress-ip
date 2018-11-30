@@ -1,5 +1,5 @@
 /*
-Copyright The Kubernetes Authors.
+Copyright 2017 Nirmata inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ package fake
 
 import (
 	clientset "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned"
-	samplecontrollerv1alpha1 "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned/typed/egressip/v1alpha1"
-	fakesamplecontrollerv1alpha1 "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned/typed/egressip/v1alpha1/fake"
+	staticegressipsv1alpha1 "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned/typed/egressip/v1alpha1"
+	fakestaticegressipsv1alpha1 "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned/typed/egressip/v1alpha1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -71,12 +71,12 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 
 var _ clientset.Interface = &Clientset{}
 
-// SamplecontrollerV1alpha1 retrieves the SamplecontrollerV1alpha1Client
-func (c *Clientset) SamplecontrollerV1alpha1() samplecontrollerv1alpha1.SamplecontrollerV1alpha1Interface {
-	return &fakesamplecontrollerv1alpha1.FakeSamplecontrollerV1alpha1{Fake: &c.Fake}
+// StaticegressipsV1alpha1 retrieves the StaticegressipsV1alpha1Client
+func (c *Clientset) StaticegressipsV1alpha1() staticegressipsv1alpha1.StaticegressipsV1alpha1Interface {
+	return &fakestaticegressipsv1alpha1.FakeStaticegressipsV1alpha1{Fake: &c.Fake}
 }
 
-// Samplecontroller retrieves the SamplecontrollerV1alpha1Client
-func (c *Clientset) Samplecontroller() samplecontrollerv1alpha1.SamplecontrollerV1alpha1Interface {
-	return &fakesamplecontrollerv1alpha1.FakeSamplecontrollerV1alpha1{Fake: &c.Fake}
+// Staticegressips retrieves the StaticegressipsV1alpha1Client
+func (c *Clientset) Staticegressips() staticegressipsv1alpha1.StaticegressipsV1alpha1Interface {
+	return &fakestaticegressipsv1alpha1.FakeStaticegressipsV1alpha1{Fake: &c.Fake}
 }

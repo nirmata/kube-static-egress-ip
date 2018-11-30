@@ -1,5 +1,5 @@
 /*
-Copyright The Kubernetes Authors.
+Copyright 2017 Nirmata inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,13 +30,13 @@ import (
 
 // FakeStaticEgressIPs implements StaticEgressIPInterface
 type FakeStaticEgressIPs struct {
-	Fake *FakeSamplecontrollerV1alpha1
+	Fake *FakeStaticegressipsV1alpha1
 	ns   string
 }
 
-var staticegressipsResource = schema.GroupVersionResource{Group: "samplecontroller.k8s.io", Version: "v1alpha1", Resource: "staticegressips"}
+var staticegressipsResource = schema.GroupVersionResource{Group: "staticegressips.nirmata.io", Version: "v1alpha1", Resource: "staticegressips"}
 
-var staticegressipsKind = schema.GroupVersionKind{Group: "samplecontroller.k8s.io", Version: "v1alpha1", Kind: "StaticEgressIP"}
+var staticegressipsKind = schema.GroupVersionKind{Group: "staticegressips.nirmata.io", Version: "v1alpha1", Kind: "StaticEgressIP"}
 
 // Get takes name of the staticEgressIP, and returns the corresponding staticEgressIP object, and an error if there is any.
 func (c *FakeStaticEgressIPs) Get(name string, options v1.GetOptions) (result *v1alpha1.StaticEgressIP, err error) {

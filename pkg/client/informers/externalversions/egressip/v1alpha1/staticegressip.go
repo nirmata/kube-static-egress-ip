@@ -1,5 +1,5 @@
 /*
-Copyright The Kubernetes Authors.
+Copyright 2017 Nirmata inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -61,13 +61,13 @@ func NewFilteredStaticEgressIPInformer(client versioned.Interface, namespace str
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.SamplecontrollerV1alpha1().StaticEgressIPs(namespace).List(options)
+				return client.StaticegressipsV1alpha1().StaticEgressIPs(namespace).List(options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.SamplecontrollerV1alpha1().StaticEgressIPs(namespace).Watch(options)
+				return client.StaticegressipsV1alpha1().StaticEgressIPs(namespace).Watch(options)
 			},
 		},
 		&egressipv1alpha1.StaticEgressIP{},

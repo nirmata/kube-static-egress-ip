@@ -1,5 +1,5 @@
 /*
-Copyright The Kubernetes Authors.
+Copyright 2017 Nirmata inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,17 +24,17 @@ import (
 	testing "k8s.io/client-go/testing"
 )
 
-type FakeSamplecontrollerV1alpha1 struct {
+type FakeStaticegressipsV1alpha1 struct {
 	*testing.Fake
 }
 
-func (c *FakeSamplecontrollerV1alpha1) StaticEgressIPs(namespace string) v1alpha1.StaticEgressIPInterface {
+func (c *FakeStaticegressipsV1alpha1) StaticEgressIPs(namespace string) v1alpha1.StaticEgressIPInterface {
 	return &FakeStaticEgressIPs{c, namespace}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
-func (c *FakeSamplecontrollerV1alpha1) RESTClient() rest.Interface {
+func (c *FakeStaticegressipsV1alpha1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
 }

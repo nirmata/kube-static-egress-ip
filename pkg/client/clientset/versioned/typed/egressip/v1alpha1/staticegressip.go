@@ -1,5 +1,5 @@
 /*
-Copyright The Kubernetes Authors.
+Copyright 2017 Nirmata inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ type staticEgressIPs struct {
 }
 
 // newStaticEgressIPs returns a StaticEgressIPs
-func newStaticEgressIPs(c *SamplecontrollerV1alpha1Client, namespace string) *staticEgressIPs {
+func newStaticEgressIPs(c *StaticegressipsV1alpha1Client, namespace string) *staticEgressIPs {
 	return &staticEgressIPs{
 		client: c.RESTClient(),
 		ns:     namespace,
