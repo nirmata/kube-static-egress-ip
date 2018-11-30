@@ -1,68 +1,85 @@
----
-apiVersion: apps/v1beta1
-kind: Deployment
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  labels:
-    kubeless: kinesis-trigger-controller
-  name: kinesis-trigger-controller
-  namespace: kubeless
-spec:
-  selector:
-    matchLabels:
-      kubeless: kinesis-trigger-controller
-  template:
-    metadata:
-      labels:
-        kubeless: kinesis-trigger-controller
-    spec:
-      containers:
-      - env:
-        - name: KUBELESS_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        - name: KUBELESS_CONFIG
-          value: kubeless-config
-        image: bitnami/kinesis-trigger-controller:latest
-        imagePullPolicy: IfNotPresent
-        name: kinesis-trigger-controller
-      serviceAccountName: controller-acct
+  name: egressip-controller
+  namespace: kube-system
 ---
-apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
-metadata:
-  name: kinesis-controller-deployer
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - services
-  - configmaps
-  - secrets
-  verbs:
-  - get
-  - list
-- apiGroups:
-  - kubeless.io
-  resources:
-  - functions
-  - kinesistriggers
-  verbs:
-  - get
-  - list
-  - watch
-  - update
-  - delete
----
 apiVersion: rbac.authorization.k8s.io/v1beta1
-kind: ClusterRoleBinding
 metadata:
-  name: kinesis-controller-deployer
+  name: egressip-controller
+  namespace: kube-system
+rules:
+  - apiGroups:
+    - ""
+    resources:
+      - namespaces
+      - pods
+      - services
+      - nodes
+      - endpoints
+    verbs:
+      - list
+      - get
+      - watch
+  - apiGroups:
+    - "staticegressips.nirmata.io"
+    resources:
+      - staticegressips
+    verbs:
+      - list
+      - get
+      - watch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: egressip-controller
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: kinesis-controller-deployer
+  name: egressip-controller
 subjects:
 - kind: ServiceAccount
-  name: controller-acct
-  namespace: kubeless
+  name: egressip-controller
+  namespace: kube-system
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  labels:
+    k8s-app: egressip-controller
+    tier: node
+  name: egressip-controller
+  namespace: kube-system
+spec:
+  template:
+    metadata:
+      labels:
+        k8s-app: egressip-controller
+        tier: node
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      serviceAccountName: egressip-controller
+      serviceAccount: egressip-controller
+      containers:
+      - name: egressip-controller
+        image: nirmata/egressip-controller:tagname
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: 250m
+            memory: 250Mi
+        securityContext:
+          privileged: true
+      hostNetwork: true
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/not-ready
+        operator: Exists

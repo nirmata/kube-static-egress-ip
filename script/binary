@@ -16,7 +16,6 @@
 
 set -e
 
-
 GIT_COMMIT=$(git describe --tags --dirty --always)
 BUILD_FLAGS=(-ldflags="-w -X github.com/nirmata/kube-static-egress-ip/pkg/version.Version=${GIT_COMMIT}")
 
@@ -26,7 +25,7 @@ rm -f ./egressip-controller
 
 echo "Building Nirmata static egress IP binaries"
 # Build binary
-go build -o egressip-controller \
+CGO_ENABLED=0 go build -o egressip-controller \
     "${BUILD_FLAGS[@]}" \
     github.com/nirmata/kube-static-egress-ip/cmd/...
 

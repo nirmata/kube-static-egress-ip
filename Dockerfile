@@ -2,6 +2,11 @@ FROM alpine:3.8
 
 MAINTAINER Jim Bugwadia <jim@nirmata.com>
 
-ADD egressip-controller /egressip-controller
+RUN apk add --no-cache \
+      iptables \
+      ipset \
+      iproute2
 
-ENTRYPOINT ["/egressip-controller"]
+ADD egressip-controller /usr/local/bin//egressip-controller
+
+ENTRYPOINT ["/usr/local/bin//egressip-controller"]

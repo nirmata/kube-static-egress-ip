@@ -2,7 +2,7 @@ GO = go
 GO_FLAGS =
 GOFMT = gofmt
 DOCKER = docker
-EGRESSIP_CONTROLLER_IMAGE = egressip-controller-manager:latest
+EGRESSIP_CONTROLLER_IMAGE = egressip-controller
 OS = linux
 ARCH = amd64
 BUNDLES = bundles
@@ -18,4 +18,4 @@ update:
 	./hack/update-codegen.sh
 
 container:
-	docker build -t nirmata/egressip-controller:latest -f Dockerfile .
+	docker build -t nirmata/$(EGRESSIP_CONTROLLER_IMAGE):latest -f Dockerfile .
