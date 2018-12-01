@@ -39,7 +39,8 @@ type StaticEgressIPSpec struct {
 
 type Rule struct {
 	ServiceName string `json:"service-name"`
-	Address     string `json:"address"`
+	EgressIP    string `json:"egressip"`
+	Cidr        string `json:"cidr"`
 }
 
 // StaticEgressIPStatus is the status for a StaticEgressIP resource

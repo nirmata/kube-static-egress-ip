@@ -21,97 +21,56 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
-	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 
-	samplev1alpha1 "github.com/nirmata/kube-static-egress-ip/pkg/apis/egressip/v1alpha1"
+	egressipAPI "github.com/nirmata/kube-static-egress-ip/pkg/apis/egressip/v1alpha1"
 	clientset "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned"
-	samplescheme "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned/scheme"
 	informers "github.com/nirmata/kube-static-egress-ip/pkg/client/informers/externalversions/egressip/v1alpha1"
 	listers "github.com/nirmata/kube-static-egress-ip/pkg/client/listers/egressip/v1alpha1"
 )
 
 const controllerAgentName = "egressip-controller"
 
-const (
-	// SuccessSynced is used as part of the Event 'reason' when a Foo is synced
-	SuccessSynced = "Synced"
-	// ErrResourceExists is used as part of the Event 'reason' when a Foo fails
-	// to sync due to a Deployment of the same name already existing.
-	ErrResourceExists = "ErrResourceExists"
-
-	// MessageResourceExists is the message used for Events when a resource
-	// fails to sync due to a Deployment already existing
-	MessageResourceExists = "Resource %q already exists and is not managed by Foo"
-	// MessageResourceSynced is the message used for an Event fired when a Foo
-	// is synced successfully
-	MessageResourceSynced = "Foo synced successfully"
-)
-
-// Controller is the controller implementation for Foo resources
+// Controller is the controller implementation for StaticEgressIP resources
 type Controller struct {
 	// kubeclientset is a standard kubernetes clientset
 	kubeclientset kubernetes.Interface
-	// egressipclientset is a clientset for our own API group
-	egressipclientset clientset.Interface
+	// egressIPclientset is a clientset for our own API group
+	egressIPclientset clientset.Interface
+	// egressIPLister can list/get StaticEgressIP from the shared informer's store
+	egressIPLister listers.StaticEgressIPLister
+	// egressIPsSynced returns true if the StaticEgressIP store has been synced at least once.
+	egressIPsSynced cache.InformerSynced
 
-	foosLister listers.StaticEgressIPLister
-	foosSynced cache.InformerSynced
-
-	// workqueue is a rate limited work queue. This is used to queue work to be
-	// processed instead of performing it as soon as a change happens. This
-	// means we can ensure we only process a fixed amount of resources at a
-	// time, and makes it easy to ensure we are never processing the same item
-	// simultaneously in two different workers.
 	workqueue workqueue.RateLimitingInterface
-	// recorder is an event recorder for recording Event resources to the
-	// Kubernetes API.
-	recorder record.EventRecorder
 }
 
-// NewController returns a new sample controller
-func NewController(
+// NewEgressIPController returns a new NewEgressIPController
+func NewEgressIPController(
 	kubeclientset kubernetes.Interface,
-	egressipclientset clientset.Interface,
-	fooInformer informers.StaticEgressIPInformer) *Controller {
-
-	// Create event broadcaster
-	// Add sample-controller types to the default Kubernetes Scheme so Events can be
-	// logged for sample-controller types.
-	utilruntime.Must(samplescheme.AddToScheme(scheme.Scheme))
-	glog.V(4).Info("Creating event broadcaster")
-	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(glog.Infof)
-	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: kubeclientset.CoreV1().Events("")})
-	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
+	egressIPclientset clientset.Interface,
+	egressIPInformer informers.StaticEgressIPInformer) *Controller {
 
 	controller := &Controller{
 		kubeclientset:     kubeclientset,
-		egressipclientset: egressipclientset,
-		foosLister:        fooInformer.Lister(),
-		foosSynced:        fooInformer.Informer().HasSynced,
-		workqueue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Foos"),
-		recorder:          recorder,
+		egressIPclientset: egressIPclientset,
+		egressIPLister:    egressIPInformer.Lister(),
+		egressIPsSynced:   egressIPInformer.Informer().HasSynced,
+		workqueue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "StaticEgressIPs"),
 	}
 
-	glog.Info("Setting up event handlers")
-	// Set up an event handler for when Foo resources change
-	fooInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: controller.enqueueFoo,
-		UpdateFunc: func(old, new interface{}) {
-			controller.enqueueFoo(new)
-		},
-		DeleteFunc: controller.enqueueFoo,
+	glog.Info("Setting up event handlers to handle add/delete/update events to StaticEgressIP resources")
+	// Set up an event handler for when StaticEgressIP resources change
+	egressIPInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    controller.addStaticEgressIP,
+		UpdateFunc: controller.updateStaticEgressIP,
+		DeleteFunc: controller.deleteStaticEgressIP,
 	})
 
 	return controller
@@ -126,16 +85,16 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	defer c.workqueue.ShutDown()
 
 	// Start the informer factories to begin populating the informer caches
-	glog.Info("Starting Foo controller")
+	glog.Info("Starting StaticEgressIP controller")
 
 	// Wait for the caches to be synced before starting workers
 	glog.Info("Waiting for informer caches to sync")
-	if ok := cache.WaitForCacheSync(stopCh, c.foosSynced); !ok {
+	if ok := cache.WaitForCacheSync(stopCh, c.egressIPsSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
 	glog.Info("Starting workers")
-	// Launch two workers to process Foo resources
+	// Launch two workers to process StaticEgressIP resources
 	for i := 0; i < threadiness; i++ {
 		go wait.Until(c.runWorker, time.Second, stopCh)
 	}
@@ -189,7 +148,7 @@ func (c *Controller) processNextWorkItem() bool {
 			return nil
 		}
 		// Run the syncHandler, passing it the namespace/name string of the
-		// Foo resource to be synced.
+		// StaticEgressIP resource to be synced.
 		if err := c.syncHandler(key); err != nil {
 			// Put the item back on the workqueue to handle any transient errors.
 			c.workqueue.AddRateLimited(key)
@@ -211,7 +170,7 @@ func (c *Controller) processNextWorkItem() bool {
 }
 
 // syncHandler compares the actual state with the desired, and attempts to
-// converge the two. It then updates the Status block of the Foo resource
+// converge the two. It then updates the Status block of the StaticEgressIP resource
 // with the current status of the resource.
 func (c *Controller) syncHandler(key string) error {
 	// Convert the namespace/name string into a distinct namespace and name
@@ -221,41 +180,78 @@ func (c *Controller) syncHandler(key string) error {
 		return nil
 	}
 
-	// Get the Foo resource with this namespace/name
-	foo, err := c.foosLister.StaticEgressIPs(namespace).Get(name)
+	// Get the StaticEgressIP resource with this namespace/name
+	staticEgressIP, err := c.egressIPLister.StaticEgressIPs(namespace).Get(name)
 	if err != nil {
-		// The Foo resource may no longer exist, in which case we stop
+		// The StaticEgressIP resource may no longer exist, in which case we stop
 		// processing.
 		if errors.IsNotFound(err) {
-			runtime.HandleError(fmt.Errorf("foo '%s' in work queue no longer exists", key))
+			runtime.HandleError(fmt.Errorf("StaticEgressIP '%s' in work queue no longer exists", key))
 			return nil
 		}
 
 		return err
 	}
 
-	// Finally, we update the status block of the Foo resource to reflect the
+	glog.Info("Processing update to StaticEgressIP: " + key)
+	for _, rule := range staticEgressIP.Spec.Rules {
+		glog.Info("Service Name: " + rule.ServiceName)
+		glog.Info("Egress IP: " + rule.EgressIP)
+		glog.Info("CIDR: " + rule.Cidr)
+	}
+
+	// Finally, we update the status block of the StaticEgressIP resource to reflect the
 	// current state of the world
-	err = c.updateFooStatus(foo)
+	err = c.updateStaticEgressIPStatus(staticEgressIP)
 	if err != nil {
 		return err
 	}
 
-	c.recorder.Event(foo, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
 	return nil
 }
 
-func (c *Controller) updateFooStatus(foo *samplev1alpha1.StaticEgressIP) error {
+func (c *Controller) updateStaticEgressIPStatus(staticEgressIP *egressipAPI.StaticEgressIP) error {
 	return nil
 }
 
-// enqueueFoo takes a Foo resource and converts it into a namespace/name
+func (c *Controller) addStaticEgressIP(obj interface{}) {
+	egressIPObj := obj.(*egressipAPI.StaticEgressIP)
+	glog.Infof("Adding StaticEgressIP: %s/%s", egressIPObj.Namespace, egressIPObj.Name)
+	c.enqueueStaticEgressIP(egressIPObj)
+
+}
+
+func (c *Controller) updateStaticEgressIP(old, current interface{}) {
+	oldEgressIPObj := old.(*egressipAPI.StaticEgressIP)
+	newEgressIPObj := current.(*egressipAPI.StaticEgressIP)
+	glog.Infof("Updating StaticEgressIP: %s/%s", oldEgressIPObj.Namespace, oldEgressIPObj.Name)
+	c.enqueueStaticEgressIP(newEgressIPObj)
+}
+
+func (c *Controller) deleteStaticEgressIP(obj interface{}) {
+	egressIPObj, ok := obj.(*egressipAPI.StaticEgressIP)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			runtime.HandleError(fmt.Errorf("Couldn't get object from tombstone %#v", obj))
+			return
+		}
+		egressIPObj, ok = tombstone.Obj.(*egressipAPI.StaticEgressIP)
+		if !ok {
+			runtime.HandleError(fmt.Errorf("Tombstone contained object that is not a Deployment %#v", obj))
+			return
+		}
+	}
+	glog.Infof("Deleting StaticEgressIP %s", egressIPObj.Name)
+	c.enqueueStaticEgressIP(egressIPObj)
+}
+
+// enqueueStaticEgressIP takes a StaticEgressIP resource and converts it into a namespace/name
 // string which is then put onto the work queue. This method should *not* be
-// passed resources of any type other than Foo.
-func (c *Controller) enqueueFoo(obj interface{}) {
-	var key string
-	var err error
-	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
+// passed resources of any type other than StaticEgressIP.
+func (c *Controller) enqueueStaticEgressIP(egressIP *egressipAPI.StaticEgressIP) {
+	key, err := cache.MetaNamespaceKeyFunc(egressIP)
+	if err != nil {
 		runtime.HandleError(err)
 		return
 	}
@@ -263,9 +259,9 @@ func (c *Controller) enqueueFoo(obj interface{}) {
 }
 
 // handleObject will take any resource implementing metav1.Object and attempt
-// to find the Foo resource that 'owns' it. It does this by looking at the
+// to find the StaticEgressIP resource that 'owns' it. It does this by looking at the
 // objects metadata.ownerReferences field for an appropriate OwnerReference.
-// It then enqueues that Foo resource to be processed. If the object does not
+// It then enqueues that StaticEgressIP resource to be processed. If the object does not
 // have an appropriate OwnerReference, it will simply be skipped.
 func (c *Controller) handleObject(obj interface{}) {
 	var object metav1.Object
@@ -284,20 +280,4 @@ func (c *Controller) handleObject(obj interface{}) {
 		glog.V(4).Infof("Recovered deleted object '%s' from tombstone", object.GetName())
 	}
 	glog.V(4).Infof("Processing object: %s", object.GetName())
-	if ownerRef := metav1.GetControllerOf(object); ownerRef != nil {
-		// If this object is not owned by a Foo, we should not do anything more
-		// with it.
-		if ownerRef.Kind != "Foo" {
-			return
-		}
-
-		foo, err := c.foosLister.StaticEgressIPs(object.GetNamespace()).Get(ownerRef.Name)
-		if err != nil {
-			glog.V(4).Infof("ignoring orphaned object '%s' of foo '%s'", object.GetSelfLink(), ownerRef.Name)
-			return
-		}
-
-		c.enqueueFoo(foo)
-		return
-	}
 }
