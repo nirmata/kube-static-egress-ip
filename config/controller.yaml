@@ -65,8 +65,13 @@ spec:
       serviceAccount: egressip-controller
       containers:
       - name: egressip-controller
-        image: nirmata/egressip-controller:tagname
+        image: nirmata/egressip-controller:latest
         imagePullPolicy: Always
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         resources:
           requests:
             cpu: 250m

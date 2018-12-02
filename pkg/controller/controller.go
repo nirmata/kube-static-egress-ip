@@ -17,11 +17,12 @@ limitations under the License.
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/golang/glog"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -33,9 +34,14 @@ import (
 	clientset "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned"
 	informers "github.com/nirmata/kube-static-egress-ip/pkg/client/informers/externalversions/egressip/v1alpha1"
 	listers "github.com/nirmata/kube-static-egress-ip/pkg/client/listers/egressip/v1alpha1"
+	director "github.com/nirmata/kube-static-egress-ip/pkg/director"
+	utils "github.com/nirmata/kube-static-egress-ip/pkg/utils"
 )
 
-const controllerAgentName = "egressip-controller"
+const (
+	controllerAgentName    = "egressip-controller"
+	egressGatewayAnnotaion = "nirmata.io/staticegressips-gateway"
+)
 
 // Controller is the controller implementation for StaticEgressIP resources
 type Controller struct {
@@ -48,7 +54,9 @@ type Controller struct {
 	// egressIPsSynced returns true if the StaticEgressIP store has been synced at least once.
 	egressIPsSynced cache.InformerSynced
 
-	workqueue workqueue.RateLimitingInterface
+	workqueue      workqueue.RateLimitingInterface
+	isGateway      bool
+	gatewayAddress string
 }
 
 // NewEgressIPController returns a new NewEgressIPController
@@ -84,6 +92,8 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	defer runtime.HandleCrash()
 	defer c.workqueue.ShutDown()
 
+	var err error
+
 	// Start the informer factories to begin populating the informer caches
 	glog.Info("Starting StaticEgressIP controller")
 
@@ -99,11 +109,74 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 		go wait.Until(c.runWorker, time.Second, stopCh)
 	}
 
+	c.isGateway, err = c.isEgressGateway(c.kubeclientset)
+	if err != nil {
+		glog.Fatalf("Failed to identify if the node is configured as egress traffic gateway: " + err.Error())
+	}
+
+	if c.isGateway {
+		glog.Info("Node is configured to egress traffic gateway")
+
+	} else {
+		glog.Info("Node is configured to egress traffic director")
+	}
+
+	if !c.isGateway {
+		c.gatewayAddress, err = c.getEgressGateway(c.kubeclientset)
+		if err != nil {
+			glog.Fatalf("Failed to identify the node that will be egress traffic gateway: " + err.Error())
+		}
+		if c.gatewayAddress == "" {
+			glog.Errorf("No nodes are configured to be egress gateway")
+		}
+		glog.Infof("Node %s is configured to egress traffic gateway", c.gatewayAddress)
+	}
+
+	trafficDirector, err := director.NewEgressDirector()
+	if err != nil {
+		glog.Fatalf("Failed to setup egress traffic director: " + err.Error())
+	}
+
+	err = trafficDirector.Setup()
+	if err != nil {
+		glog.Fatalf("Failed to setup egress traffic director: " + err.Error())
+	}
+
 	glog.Info("Started workers")
 	<-stopCh
 	glog.Info("Shutting down workers")
 
 	return nil
+}
+
+// isEgressGateway returns true if node is configured as egress traffic gateway
+func (c *Controller) isEgressGateway(clientset kubernetes.Interface) (bool, error) {
+	nodeObject, err := utils.GetNodeObject(clientset, "")
+	if err != nil {
+		return false, err
+	}
+	_, ok := nodeObject.ObjectMeta.Annotations[egressGatewayAnnotaion]
+
+	return ok, nil
+}
+
+// getEgressGateway returns true if node is configured as egress traffic gateway
+func (c *Controller) getEgressGateway(clientset kubernetes.Interface) (string, error) {
+	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	if err != nil {
+		return "", errors.New("Failed to list the nodes: " + err.Error())
+	}
+	for _, nodeObject := range nodes.Items {
+		_, ok := nodeObject.ObjectMeta.Annotations[egressGatewayAnnotaion]
+		if ok {
+			nodeIP, err := utils.GetNodeIP(&nodeObject)
+			if err != nil {
+				return "", errors.New("Failed to get node IP of the node marked for egress gateway: " + err.Error())
+			}
+			return nodeIP.String(), nil
+		}
+	}
+	return "", nil
 }
 
 // runWorker is a long-running function that will continually call the
@@ -185,7 +258,7 @@ func (c *Controller) syncHandler(key string) error {
 	if err != nil {
 		// The StaticEgressIP resource may no longer exist, in which case we stop
 		// processing.
-		if errors.IsNotFound(err) {
+		if k8serrors.IsNotFound(err) {
 			runtime.HandleError(fmt.Errorf("StaticEgressIP '%s' in work queue no longer exists", key))
 			return nil
 		}

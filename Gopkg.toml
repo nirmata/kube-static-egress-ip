@@ -11,11 +11,18 @@ required = [
   "k8s.io/code-generator/cmd/informer-gen",
 ]
 
-
 [[constraint]]
   name = "k8s.io/client-go"
   version = "kubernetes-1.12.3"
 
 [[constraint]]
   name = "github.com/golang/glog"
+  branch = "master"
+
+[[constraint]]
+  name = "github.com/coreos/go-iptables"
+  version = "0.4.0"
+
+[[constraint]]
+  name = "github.com/janeczku/go-ipset"
   branch = "master"
