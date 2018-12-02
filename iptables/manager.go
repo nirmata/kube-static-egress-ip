@@ -9,6 +9,7 @@ import (
 
 type manager struct {
 	ipt *iptables.IPTables
+	// add ipset info
 }
 
 // NewSourceIPModifier is a constructor for SourceIPModifier
@@ -20,19 +21,36 @@ func NewSourceIPModifier() (enforcer.SourceIPModifier, error) {
 	return &manager{ipt: ipt}, nil
 }
 
-// AddNatRules add an iptables rule which SNATs all traffic for destinationIP
-// with NatVipIP. That is, any traffic with destination == destinationIP
-// leaving this node will have a source IP == NatVipIP
-func (m *manager) AddNatRules(destinationIP, NatVipIP string) error {
+func (m *manager) AddStaticIptablesRule(srcSetName, dstSetName, NatVipIP string) error {
 	return nil
 }
 
-// ClearNatRules clears IPtables rules added by AddNatRules
-func (m *manager) ClearNatRules(detinationIP, NatVipIP string) error {
+// ClearIptablesRule clears IPtables rules added by AddNatRules
+func (m *manager) ClearIptablesRule(srcSetName, dstSetName, NatVipIP string) error {
 	return nil
 }
 
-// ListNatRules lists Nat rules configured
-func (m *manager) ListNatRules() ([]string, error) {
+// ListIptablesRule lists Nat rules configured
+func (m *manager) ListIptablesRule() ([]string, error) {
 	return nil, nil
+}
+
+// AddSourceIP
+func (m *manager) AddSourceIP(ip string) error {
+	return nil
+}
+
+// DelSourceIP
+func (m *manager) DelSourceIP(ip string) error {
+	return nil
+}
+
+// AddDestIP
+func (m *manager) AddDestIP(ip string) error {
+	return nil
+}
+
+// DelDestIP
+func (m *manager) DelDestIP(ip string) error {
+	return nil
 }

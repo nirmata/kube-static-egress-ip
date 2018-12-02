@@ -18,14 +18,25 @@ type RouteModifier interface {
 // SourceIPModifier configures the node which does SNAT for traffic
 type SourceIPModifier interface {
 
-	// AddNatRules add an iptables rule which SNATs all traffic for destinationIP
-	// with NatVipIP. That is, any traffic with destination == destinationIP
-	// leaving this node will have a source IP == NatVipIP
-	AddNatRules(destinationIP, NatVipIP string) error
+	// AddStaticIptablesRule adds rules for traffic from srcSet > dstSet to be SNAT
+	// with NatVipIP.
+	AddStaticIptablesRule(srcSetName, dstSetName, NatVipIP string) error
 
-	// ClearNatRules clears IPtables rules added by AddNatRules
-	ClearNatRules(detinationIP, NatVipIP string) error
+	// // ClearIptablesRule clears IPtables rules added by AddNatRules
+	ClearIptablesRule(srcSetName, dstSetName, NatVipIP string) error
 
-	// ListNatRules lists Nat rules configured
-	ListNatRules() ([]string, error)
+	// ListIptablesRule lists Nat rules configured
+	ListIptablesRule() ([]string, error)
+
+	// AddSourceIP
+	AddSourceIP(ip string) error
+
+	// DelSourceIP
+	DelSourceIP(ip string) error
+
+	// AddDestIP
+	AddDestIP(ip string) error
+
+	// DelDestIP
+	DelDestIP(ip string) error
 }
