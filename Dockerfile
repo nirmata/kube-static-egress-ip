@@ -1,12 +1,19 @@
-FROM alpine:3.8
-
+FROM golang:1.10.2 as builder
 MAINTAINER Jim Bugwadia <jim@nirmata.com>
 
-RUN apk add --no-cache \
-      iptables \
-      ipset \
-      iproute2
+ENV GOPATH=/workspace/golang/
 
-ADD egressip-controller /usr/local/bin//egressip-controller
+RUN mkdir -p /workspace/golang/src/github.com/nirmata/kube-static-egress-ip
 
-ENTRYPOINT ["/usr/local/bin//egressip-controller"]
+ADD $PWD /workspace/golang/src/github.com/nirmata/kube-static-egress-ip
+
+WORKDIR /workspace/golang/src/github.com/nirmata/kube-static-egress-ip/cmd/
+
+RUN CGO_ENABLED=0 go install -ldflags "-s" -v
+
+FROM alpine:3.8
+RUN apk --no-cache add iproute2 iptables ipset
+WORKDIR /root/
+COPY --from=builder /workspace/golang/bin/cmd /usr/local/bin/egressip-controller
+
+ENTRYPOINT ["/usr/local/bin/egressip-controller"]
