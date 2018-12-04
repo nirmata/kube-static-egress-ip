@@ -83,6 +83,17 @@ func (d *egressDirector) Setup() error {
 		}
 	}
 
+	args = []string{"-j", "ACCEPT"}
+	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, args...)
+	if err != nil {
+		return errors.New("Failed to verify rule exists in BYPASS_CNI_MASQURADE chain of nat table to bypass the CNI masqurade" + err.Error())
+	}
+	if !hasRule {
+		err = d.ipt.Append("nat", bypassCNIMasquradeChainName, args...)
+		if err != nil {
+			return errors.New("Failed to run iptables command to add a rule to ACCEPT traffic in BYPASS_CNI_MASQURADE chain" + err.Error())
+		}
+	}
 	return nil
 }
 
