@@ -1,4 +1,4 @@
-package gateway
+package ipset
 
 import (
 	"errors"

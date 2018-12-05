@@ -78,6 +78,9 @@ spec:
             memory: 250Mi
         securityContext:
           privileged: true
+        volumeMounts:
+        - name: iproute2
+          mountPath: /etc/iproute2
       hostNetwork: true
       tolerations:
       - key: CriticalAddonsOnly
@@ -88,3 +91,7 @@ spec:
       - effect: NoSchedule
         key: node.kubernetes.io/not-ready
         operator: Exists
+      volumes:
+      - name: iproute2
+        hostPath:
+          path: /etc/iproute2

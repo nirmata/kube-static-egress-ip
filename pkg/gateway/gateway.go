@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/nirmata/kube-static-egress-ip/pkg/ipset"
 )
 
 // EgressGateway configures the node which does SNAT for egress traffic
@@ -32,8 +33,8 @@ type EgressGateway interface {
 
 type manager struct {
 	ipt         *iptables.IPTables
-	sourceIPSet *IPSet
-	destIPSet   *IPSet
+	sourceIPSet *ipset.IPSet
+	destIPSet   *ipset.IPSet
 }
 
 const (
@@ -59,11 +60,11 @@ func NewEgressGateway(srcSetName, dstSetName string) (EgressGateway, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate iptables: %v", err)
 	}
-	srcSet, err := New(sourceIPSetName, "hash:ip", &Params{})
+	srcSet, err := ipset.New(sourceIPSetName, "hash:ip", &Params{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create source Set err %v", err)
 	}
-	dstSet, err := New(destinationIPSetName, "hash:ip", &Params{})
+	dstSet, err := ipset.New(destinationIPSetName, "hash:ip", &Params{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create source Set err %v", err)
 	}

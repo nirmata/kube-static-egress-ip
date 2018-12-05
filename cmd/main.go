@@ -63,8 +63,9 @@ func main() {
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
 	egressipInformerFactory := informers.NewSharedInformerFactory(egressipClient, time.Second*30)
+	endpointsInformerFactory := kubeInformerFactory.Core().V1().Endpoints()
 
-	controller := controller.NewEgressIPController(kubeClient, egressipClient,
+	controller := controller.NewEgressIPController(kubeClient, egressipClient, endpointsInformerFactory,
 		egressipInformerFactory.Staticegressips().V1alpha1().StaticEgressIPs())
 
 	// notice that there is no need to run Start methods in a separate goroutine. (i.e. go kubeInformerFactory.Start(stopCh)
