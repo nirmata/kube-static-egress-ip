@@ -4,5 +4,6 @@ metadata:
   name: test
 spec:
   rules:
-  - address: 10.1.1.1
-    service-name: test
+  - egressip: 192.168.56.100
+    service-name: frontend
+    cidr: 4.2.2.2/32

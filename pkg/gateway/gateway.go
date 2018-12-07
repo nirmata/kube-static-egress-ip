@@ -1,137 +1,177 @@
 package gateway
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/nirmata/kube-static-egress-ip/pkg/ipset"
+	"github.com/golang/glog"
+	ipset "github.com/janeczku/go-ipset/ipset"
 )
 
-// EgressGateway configures the node which does SNAT for egress traffic
-// from the pods that need a static egress IP
-type EgressGateway interface {
-
-	// AddStaticIptablesRule adds rules for traffic from srcSet > dstSet to be SNAT
-	// with NatVipIP.
-	AddStaticIptablesRule(srcSetName, dstSetName, NatVipIP string) error
-
-	// ClearIptablesRule clears IPtables rules added by AddNatRules
-	ClearIptablesRule(srcSetName, dstSetName, NatVipIP string) error
-
-	// AddSourceIP
-	AddSourceIP(ip string) error
-
-	// DelSourceIP
-	DelSourceIP(ip string) error
-
-	// AddDestIP
-	AddDestIP(ip string) error
-
-	// DelDestIP
-	DelDestIP(ip string) error
-}
-
-type manager struct {
-	ipt         *iptables.IPTables
-	sourceIPSet *ipset.IPSet
-	destIPSet   *ipset.IPSet
+// EgressGateway configures the gateway node (based on the `staticegressip` CRD object)
+// with SNAT rules to NAT egress traffic from the pods that need a static egress IP
+type EgressGateway struct {
+	ipt *iptables.IPTables
 }
 
 const (
-	sourceIPSetName         = "Static-egress-sourceIPSet"
-	destinationIPSetName    = "Static-egress-DestinationIPSet"
-	defaultTimeOut          = 0
-	defaultNATIptable       = "nat"
-	defaultEgressChainName  = "STATIC-EGRESS-IP-CHAIN"
-	defaultPostRoutingChain = "POSTROUTING"
+	defaultTimeOut            = 0
+	defaultNATIptable         = "nat"
+	egressGatewayNATChainName = "STATIC-EGRESS-NAT-CHAIN"
+	defaultEgressChainName    = "STATIC-EGRESS-IP-CHAIN"
+	egressGatewayFWChainName  = "STATIC-EGRESS-FORWARD-CHAIN"
+	defaultPostRoutingChain   = "POSTROUTING"
 )
 
 // NewEgressGateway is a constructor for EgressGateway interface
-// if the setnames are empty it will use the default values
-func NewEgressGateway(srcSetName, dstSetName string) (EgressGateway, error) {
-
-	if srcSetName == "" {
-		srcSetName = sourceIPSetName
-	}
-	if dstSetName == "" {
-		dstSetName = destinationIPSetName
-	}
+func NewEgressGateway() (*EgressGateway, error) {
 	ipt, err := iptables.New()
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate iptables: %v", err)
 	}
-	srcSet, err := ipset.New(sourceIPSetName, "hash:ip", &Params{})
+	return &EgressGateway{ipt: ipt}, nil
+}
+
+func (gateway *EgressGateway) Setup() error {
+
+	// setup a chain to hold rules to accept forwarding traffic from director nodes with
+	// out which default policy FORWARD chain of filter table drops the packet
+	err := gateway.createChainIfNotExist("filter", egressGatewayFWChainName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create source Set err %v", err)
+		return errors.New("Failed to add a chain in filter table required to permit forwarding traffic from director nodes" + err.Error())
 	}
-	dstSet, err := ipset.New(destinationIPSetName, "hash:ip", &Params{})
+
+	ruleSpec := []string{"-j", egressGatewayFWChainName}
+	hasRule, err := gateway.ipt.Exists("filter", "FORWARD", ruleSpec...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create source Set err %v", err)
+		return errors.New("Failed to verify rule exists in FORWARD chain of filter table to permit forward traffic from the directors" + err.Error())
 	}
-	return &manager{ipt: ipt, sourceIPSet: srcSet, destIPSet: dstSet}, nil
+	if !hasRule {
+		err = gateway.ipt.Append("filter", "FORWARD", ruleSpec...)
+		if err != nil {
+			return errors.New("Failed to add iptables command to permit traffic from directors to be forwrded in filter chain" + err.Error())
+		}
+	}
+
+	// setup a chain in nat table to bypass run through the rules to snat traffic from the pods that need static egress ip
+	err = gateway.ipt.NewChain("nat", egressGatewayNATChainName)
+	if err != nil && err.(*iptables.Error).ExitStatus() != 1 {
+		return errors.New("Failed to add a " + egressGatewayNATChainName + " chain in NAT table" + err.Error())
+	}
+	ruleSpec = []string{"-j", egressGatewayNATChainName}
+	hasRule, err = gateway.ipt.Exists("nat", "POSTROUTING", ruleSpec...)
+	if err != nil {
+		return errors.New("Failed to verify  rule exists in POSTROUTING chain of nat table due to " + err.Error())
+	}
+	if !hasRule {
+		err = gateway.ipt.Insert("nat", "POSTROUTING", 1, ruleSpec...)
+		if err != nil {
+			return errors.New("Failed to run iptables command to add a rule to jump to STATIC-EGRESS-NAT-CHAIN chain due to " + err.Error())
+		}
+	}
+
+	return nil
 }
 
 // AddStaticIptablesRule adds iptables rule for SNAT, creates source
 // and destination IPsets. IPs can then be dynamically added to these IPsets.
-func (m *manager) AddStaticIptablesRule(srcSetName, dstSetName, NatVipIP string) error {
+func (gateway *EgressGateway) AddStaticIptablesRule(setName string, sourceIPs []string, destinationIP, egressIP string) error {
 
-	if srcSetName == "" {
-		srcSetName = sourceIPSetName
+	// create IPset from sourceIP's
+	set, err := ipset.New(setName, "hash:ip", &ipset.Params{})
+	if err != nil {
+		return errors.New("Failed to create ipset with name " + setName + " due to %" + err.Error())
 	}
-	if dstSetName == "" {
-		dstSetName = destinationIPSetName
-	}
+	glog.Infof("Created ipset name: %s", setName)
 
-	if err := m.createChainIfNotExist(defaultNATIptable, defaultEgressChainName); err != nil {
-		return fmt.Errorf("failed to create chain err %v", err)
+	// add IP's that need to be part of the ipset
+	for _, ip := range sourceIPs {
+		err = set.Add(ip, 0)
+		if err != nil {
+			return errors.New("Failed to add an ip " + ip + " into ipset with name " + setName + " due to %" + err.Error())
+		}
 	}
+	glog.Infof("Added ips %v to the ipset name: %s", sourceIPs, setName)
 
-	ruleSpec := []string{"-j", defaultEgressChainName, "-m", "SNAT egress-static-IP rule"}
-	if err := m.insertRule(defaultNATIptable, defaultPostRoutingChain, 1, ruleSpec...); err != nil {
+	ruleSpec := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	hasRule, err := gateway.ipt.Exists("filter", egressGatewayFWChainName, ruleSpec...)
+	if err != nil {
+		return errors.New("Failed to verify rule exists in " + egressGatewayFWChainName + " chain of filter table" + err.Error())
+	}
+	if !hasRule {
+		err = gateway.ipt.Append("filter", egressGatewayFWChainName, ruleSpec...)
+		if err != nil {
+			return errors.New("Failed to add iptables command to ACCEPT traffic from director nodes to get forrwarded" + err.Error())
+		}
+	}
+	glog.Infof("Added rules in filter table FORWARD chain to permit traffic")
+
+	ruleSpec = []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "SNAT", "--to-source", egressIP}
+	if err := gateway.insertRule(defaultNATIptable, egressGatewayNATChainName, 1, ruleSpec...); err != nil {
 		return fmt.Errorf("failed to insert rule to chain %v err %v", defaultPostRoutingChain, err)
 	}
 
-	ruleSpec = []string{"-m", "set", "--match-set", srcSetName, "src", "-m", "set", "--match-set", dstSetName, "dst", "-j", "SNAT", "--to-source", NatVipIP}
-	if err := m.insertRule(defaultNATIptable, defaultEgressChainName, 1, ruleSpec...); err != nil {
-		return fmt.Errorf("failed to insert rule to chain %v err %v", defaultPostRoutingChain, err)
-	}
 	return nil
 }
 
-// ClearIptablesRule clears IPtables rules added by AddNatRules
-func (m *manager) ClearIptablesRule(srcSetName, dstSetName, NatVipIP string) error {
+// DeleteStaticIptablesRule clears IPtables rules added by AddStaticIptablesRule
+func (gateway *EgressGateway) DeleteStaticIptablesRule(setName string, destinationIP, egressIP string) error {
 
-	// Delete chain reference
-	ruleSpec := []string{"-j", defaultEgressChainName, "-m", "SNAT egress-static-IP rule"}
-	if err := m.deleteRule(defaultNATIptable, defaultPostRoutingChain, ruleSpec...); err != nil {
-		return err
+	// delete rule in NAT postrouting to SNAT traffic
+	ruleSpec := []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "SNAT", "--to-source", egressIP}
+	if err := gateway.deleteRule(defaultNATIptable, egressGatewayNATChainName, ruleSpec...); err != nil {
+		return fmt.Errorf("failed to delete rule in chain %v err %v", egressGatewayNATChainName, err)
 	}
 
-	return m.deleteChain(defaultNATIptable, defaultEgressChainName)
+	// delete rule in FORWARD chain of filter table
+	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	hasRule, err := gateway.ipt.Exists("filter", egressGatewayFWChainName, ruleSpec...)
+	if err != nil {
+		return errors.New("Failed to verify rule exists in " + egressGatewayFWChainName + " chain of filter table" + err.Error())
+	}
+	if hasRule {
+		err = gateway.ipt.Delete("filter", egressGatewayFWChainName, ruleSpec...)
+		if err != nil {
+			return errors.New("Failed to delete iptables command to ACCEPT traffic from director nodes to get forwarded" + err.Error())
+		}
+	}
+
+	set, err := ipset.New(setName, "hash:ip", &ipset.Params{})
+	if err != nil {
+		return errors.New("Failed to get ipset with name " + setName + " due to %" + err.Error())
+	}
+	err = set.Destroy()
+	if err != nil {
+		return errors.New("Failed to delete ipset due to " + err.Error())
+	}
+
+	return nil
 }
 
+/*
 // AddSourceIP
-func (m *manager) AddSourceIP(ip string) error {
+func (m *EgressGateway) AddSourceIP(ip string) error {
 	return m.sourceIPSet.Add(ip, defaultTimeOut)
 }
 
 // DelSourceIP
-func (m *manager) DelSourceIP(ip string) error {
+func (m *EgressGateway) DelSourceIP(ip string) error {
 	return m.sourceIPSet.Del(ip)
 }
 
 // AddDestIP
-func (m *manager) AddDestIP(ip string) error {
+func (m *EgressGateway) AddDestIP(ip string) error {
 	return m.destIPSet.Add(ip, defaultTimeOut)
 }
 
 // DelDestIP
-func (m *manager) DelDestIP(ip string) error {
+func (m *EgressGateway) DelDestIP(ip string) error {
 	return m.destIPSet.Del(ip)
 }
-
+*/
 // CreateChainIfNotExist will check if chain exist, if not it will create one.
-func (m *manager) createChainIfNotExist(table, chain string) error {
+func (m *EgressGateway) createChainIfNotExist(table, chain string) error {
 	err := m.ipt.NewChain(table, chain)
 	if err == nil {
 		return nil // chain didn't exist, created now.
@@ -143,11 +183,11 @@ func (m *manager) createChainIfNotExist(table, chain string) error {
 	return err
 }
 
-func (m *manager) deleteChain(table, chain string) error {
+func (m *EgressGateway) deleteChain(table, chain string) error {
 	return m.ipt.DeleteChain(table, chain)
 }
 
-func (m *manager) insertRule(table, chain string, pos int, ruleSpec ...string) error {
+func (m *EgressGateway) insertRule(table, chain string, pos int, ruleSpec ...string) error {
 	exist, err := m.ipt.Exists(table, chain, ruleSpec...)
 	if err != nil {
 		return err
@@ -158,6 +198,6 @@ func (m *manager) insertRule(table, chain string, pos int, ruleSpec ...string) e
 	return m.ipt.Insert(table, chain, pos, ruleSpec...)
 }
 
-func (m manager) deleteRule(table, chain string, ruleSpec ...string) error {
+func (m EgressGateway) deleteRule(table, chain string, ruleSpec ...string) error {
 	return m.ipt.Delete(table, chain, ruleSpec...)
 }

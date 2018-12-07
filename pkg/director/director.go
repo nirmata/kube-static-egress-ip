@@ -17,16 +17,16 @@ const (
 	customStaticEgressIPRouteTableID   = "99"
 	customStaticEgressIPRouteTableName = "kube-static-egress-ip"
 	staticEgressIPFWMARK               = "1000"
-	bypassCNIMasquradeChainName        = "BYPASS_CNI_MASQURADE"
+	bypassCNIMasquradeChainName        = "STATIC-EGRESS-BYPASS-CNI"
 )
 
-// EgressDirector configures routing on a node to redirect egress traffic
-// from the pods that need a static egress IP to a node acting as egress gateway
+// EgressDirector manages routing rules needed on a node to redirect egress traffic from the pods that need
+// a static egress IP to a node acting as egress gateway based on the `staticegressip` CRD object
 type EgressDirector struct {
 	ipt *iptables.IPTables
 }
 
-// NewEgressDirector is a constructor for SourceIPModifier
+// NewEgressDirector is a constructor for EgressDirector
 func NewEgressDirector() (*EgressDirector, error) {
 	ipt, err := iptables.New()
 	if err != nil {
@@ -36,22 +36,22 @@ func NewEgressDirector() (*EgressDirector, error) {
 	return &EgressDirector{ipt: ipt}, nil
 }
 
+// Setup sets up the node with one-time basic settings needed for director functionality
 func (d *EgressDirector) Setup() error {
 
-	// create custom routing table for directing the traffic to gateway
+	// create custom routing table for directing the traffic from director nodes to the gateway node
 	b, err := ioutil.ReadFile("/etc/iproute2/rt_tables")
 	if err != nil {
-		return errors.New("Failed to setup policy routing required for directing traffing to egress gateway" + err.Error())
+		return errors.New("Failed to add custom routing table in /etc/iproute2/rt_tables needed for policy routing for directing traffing to egress gateway" + err.Error())
 	}
-
 	if !strings.Contains(string(b), customStaticEgressIPRouteTableName) {
 		f, err := os.OpenFile("/etc/iproute2/rt_tables", os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
-			return errors.New("Failed to setup policy routing required for static egress IP functionality due to " + err.Error())
+			return errors.New("Failed to open /etc/iproute2/rt_tables to verify custom routing table " + customStaticEgressIPRouteTableName + " required for static egress IP functionality due to " + err.Error())
 		}
 		defer f.Close()
 		if _, err = f.WriteString(customStaticEgressIPRouteTableID + " " + customStaticEgressIPRouteTableName + "\n"); err != nil {
-			return errors.New("Failed to setup policy routing required for statis egress IP functionality due to " + err.Error())
+			return errors.New("Failed to add custom routing table " + customStaticEgressIPRouteTableName + " in /etc/iproute2/rt_tables needed for policy routing due to " + err.Error())
 		}
 	}
 
@@ -60,40 +60,41 @@ func (d *EgressDirector) Setup() error {
 	if err != nil {
 		return errors.New("Failed to verify if `ip rule` exists due to: " + err.Error())
 	}
-	if !strings.Contains(string(out), staticEgressIPFWMARK) {
-		err = exec.Command("ip", "rule", "add", "prio", "32764", "fwmark", staticEgressIPFWMARK, "table", customStaticEgressIPRouteTableID).Run()
+	if !strings.Contains(string(out), customStaticEgressIPRouteTableName) {
+		err = exec.Command("ip", "rule", "add", "prio", "32764", "fwmark", staticEgressIPFWMARK, "table", customStaticEgressIPRouteTableName).Run()
 		if err != nil {
-			return errors.New("Failed to add policy rule to lookup traffic marked with fwmard to the custom " +
-				" routing table due to " + err.Error())
+			return errors.New("Failed to add policy rule to lookup traffic marked with fwmark " + staticEgressIPFWMARK + " to the custom " + " routing table due to " + err.Error())
 		}
 	}
 
 	// setup a chain in nat table to bypass the CNI masqurade for the traffic bound to egress gateway
 	err = d.ipt.NewChain("nat", bypassCNIMasquradeChainName)
 	if err != nil && err.(*iptables.Error).ExitStatus() != 1 {
-		return errors.New("Failed to add a chain in NAT table required to bypass CNI masqurading" + err.Error())
+		return errors.New("Failed to add a " + bypassCNIMasquradeChainName + " chain in NAT table required to bypass CNI masqurading due to" + err.Error())
 	}
-	args := []string{"-j", bypassCNIMasquradeChainName}
-	hasRule, err := d.ipt.Exists("nat", "POSTROUTING", args...)
+	ruleSpec := []string{"-j", bypassCNIMasquradeChainName}
+	hasRule, err := d.ipt.Exists("nat", "POSTROUTING", ruleSpec...)
 	if err != nil {
-		return errors.New("Failed to verify rule exists in POSTROUTING chain of nat table to bypass the CNI masqurade" + err.Error())
+		return errors.New("Failed to verify bypass CNI masqurade rule exists in POSTROUTING chain of nat table due to " + err.Error())
 	}
 	if !hasRule {
-		err = d.ipt.Insert("nat", "POSTROUTING", 1, args...)
+		err = d.ipt.Insert("nat", "POSTROUTING", 1, ruleSpec...)
 		if err != nil {
-			return errors.New("Failed to run iptables command to add a rule to jump to STATIC_EGRESSIP_BYPASS_CNI_MASQURADE chain" + err.Error())
+			return errors.New("Failed to run iptables command to add a rule to jump to STATIC_EGRESSIP_BYPASS_CNI_MASQURADE chain due to " + err.Error())
 		}
 	}
+
+	glog.Infof("Node has been setup for static egress IP director functionality successfully.")
 
 	return nil
 }
 
-// RouteToGateway adds a route in on the node to redirect traffic from a set of pod IP's
-// to a specific destination CIDR to be directed to egress gateway node
-// example sources = [10.1.1.0, 10.1.1.10], destinationIP=192.168.56.22/32, egressGateway=10.150.11.112
+// AddRouteToGateway adds a routes on the director node to redirect traffic from a set of pod IP's
+// (selected by service name in the rule of staticegressip CRD object) to a specific
+// destination CIDR to be directed to egress gateway node
 func (d *EgressDirector) AddRouteToGateway(setName string, sourceIPs []string, destinationIP, egressGateway string) error {
 
-	// create IPset from sourceIP's
+	// create IPset for the set of sourceIP's
 	set, err := ipset.New(setName, "hash:ip", &ipset.Params{})
 	if err != nil {
 		return errors.New("Failed to create ipset with name " + setName + " due to %" + err.Error())
@@ -107,17 +108,17 @@ func (d *EgressDirector) AddRouteToGateway(setName string, sourceIPs []string, d
 			return errors.New("Failed to add an ip " + ip + " into ipset with name " + setName + " due to %" + err.Error())
 		}
 	}
-	glog.Infof("Added ips %x to the ipset name: %s", sourceIPs, setName)
+	glog.Infof("Added ips %v to the ipset name: %s", sourceIPs, setName)
 
 	// create iptables rule in mangle table PREROUTING chain to match src to ipset created and destination
 	// matching  destinationIP then fwmark the packets
-	args := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
-	hasRule, err := d.ipt.Exists("mangle", "PREROUTING", args...)
+	ruleSpec := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
+	hasRule, err := d.ipt.Exists("mangle", "PREROUTING", ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
 	}
 	if !hasRule {
-		err = d.ipt.Insert("mangle", "PREROUTING", 1, args...)
+		err = d.ipt.Insert("mangle", "PREROUTING", 1, ruleSpec...)
 		if err != nil {
 			return errors.New("Failed to add rule in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
 		}
@@ -125,13 +126,13 @@ func (d *EgressDirector) AddRouteToGateway(setName string, sourceIPs []string, d
 	}
 	glog.Infof("iptables rule in mangle table PREROUTING chain to match src to ipset")
 
-	args = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "RETURN"}
-	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, args...)
+	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in BYPASS_CNI_MASQURADE chain of nat table to bypass the CNI masqurade" + err.Error())
 	}
 	if !hasRule {
-		err = d.ipt.Append("nat", bypassCNIMasquradeChainName, args...)
+		err = d.ipt.Append("nat", bypassCNIMasquradeChainName, ruleSpec...)
 		if err != nil {
 			return errors.New("Failed to run iptables command to add a rule to ACCEPT traffic in BYPASS_CNI_MASQURADE chain" + err.Error())
 		}
@@ -146,14 +147,14 @@ func (d *EgressDirector) AddRouteToGateway(setName string, sourceIPs []string, d
 		if err = exec.Command("ip", "route", "add", destinationIP, "via", egressGateway, "table", customStaticEgressIPRouteTableName).Run(); err != nil {
 			return errors.New("Failed to add route in custom route table due to: " + err.Error())
 		}
-		glog.Infof("added route")
 	}
+
 	glog.Infof("added routing entry in custom routing table to forward destinationIP to egressGateway")
 
 	return nil
 }
 
-// DeleteRouteToGateway removes the particular route rule
+// DeleteRouteToGateway removes the route routes on the director node to redirect traffic to gateway node
 func (d *EgressDirector) DeleteRouteToGateway(setName string, destinationIP, egressGateway string) error {
 
 	set, err := ipset.New(setName, "hash:ip", &ipset.Params{})
@@ -163,26 +164,26 @@ func (d *EgressDirector) DeleteRouteToGateway(setName string, destinationIP, egr
 
 	// create iptables rule in mangle table PREROUTING chain to match src to ipset created and destination
 	// matching  destinationIP then fwmark the packets
-	args := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
-	hasRule, err := d.ipt.Exists("mangle", "PREROUTING", args...)
+	ruleSpec := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
+	hasRule, err := d.ipt.Exists("mangle", "PREROUTING", ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
 	}
 	if hasRule {
-		err = d.ipt.Delete("mangle", "PREROUTING", args...)
+		err = d.ipt.Delete("mangle", "PREROUTING", ruleSpec...)
 		if err != nil {
 			return errors.New("Failed to delete rule in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
 		}
 		glog.Infof("deleted rule in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP")
 	}
 
-	args = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "RETURN"}
-	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, args...)
+	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in BYPASS_CNI_MASQURADE chain of nat table to bypass the CNI masqurade" + err.Error())
 	}
 	if hasRule {
-		err = d.ipt.Delete("nat", bypassCNIMasquradeChainName, args...)
+		err = d.ipt.Delete("nat", bypassCNIMasquradeChainName, ruleSpec...)
 		if err != nil {
 			return errors.New("Failed to delete iptables command to add a rule to ACCEPT traffic in BYPASS_CNI_MASQURADE chain" + err.Error())
 		}
@@ -206,9 +207,4 @@ func (d *EgressDirector) DeleteRouteToGateway(setName string, destinationIP, egr
 	}
 
 	return nil
-}
-
-// ListNatRules lists Nat rules configured
-func (d *EgressDirector) ListNatRules() ([]string, error) {
-	return nil, nil
 }

@@ -38,6 +38,7 @@ import (
 	informers "github.com/nirmata/kube-static-egress-ip/pkg/client/informers/externalversions/egressip/v1alpha1"
 	listers "github.com/nirmata/kube-static-egress-ip/pkg/client/listers/egressip/v1alpha1"
 	director "github.com/nirmata/kube-static-egress-ip/pkg/director"
+	gateway "github.com/nirmata/kube-static-egress-ip/pkg/gateway"
 	utils "github.com/nirmata/kube-static-egress-ip/pkg/utils"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -60,6 +61,7 @@ type Controller struct {
 	egressIPsSynced cache.InformerSynced
 	endpointsLister corelisters.EndpointsLister
 	trafficDirector *director.EgressDirector
+	trafficGateway  *gateway.EgressGateway
 	workqueue       workqueue.RateLimitingInterface
 	isGateway       bool
 	gatewayAddress  string
@@ -105,14 +107,44 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	// Start the informer factories to begin populating the informer caches
 	glog.Info("Starting StaticEgressIP controller")
 
-	c.trafficDirector, err = director.NewEgressDirector()
+	c.isGateway, err = c.isEgressGateway(c.kubeclientset)
 	if err != nil {
-		glog.Fatalf("Failed to setup egress traffic director: " + err.Error())
+		glog.Fatalf("Failed to identify if the node is configured as egress traffic gateway: " + err.Error())
 	}
 
-	err = c.trafficDirector.Setup()
-	if err != nil {
-		glog.Fatalf("Failed to setup egress traffic director: " + err.Error())
+	if c.isGateway {
+		glog.Info("Node is configured to egress traffic gateway")
+
+		c.trafficGateway, err = gateway.NewEgressGateway()
+		if err != nil {
+			glog.Fatalf("Failed to setup egress traffic gateway: " + err.Error())
+		}
+
+		err = c.trafficGateway.Setup()
+		if err != nil {
+			glog.Fatalf("Failed to setup egress traffic gateway: " + err.Error())
+		}
+	} else {
+		glog.Info("Node is configured to egress traffic director")
+
+		c.gatewayAddress, err = c.getEgressGateway(c.kubeclientset)
+		if err != nil {
+			glog.Fatalf("Failed to identify the node that will be egress traffic gateway: " + err.Error())
+		}
+		if c.gatewayAddress == "" {
+			glog.Errorf("No nodes are configured to be egress gateway")
+		}
+		glog.Infof("Node %s is configured to egress traffic gateway", c.gatewayAddress)
+
+		c.trafficDirector, err = director.NewEgressDirector()
+		if err != nil {
+			glog.Fatalf("Failed to setup egress traffic director: " + err.Error())
+		}
+
+		err = c.trafficDirector.Setup()
+		if err != nil {
+			glog.Fatalf("Failed to setup egress traffic director: " + err.Error())
+		}
 	}
 
 	// Wait for the caches to be synced before starting workers
@@ -125,29 +157,6 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	// Launch two workers to process StaticEgressIP resources
 	for i := 0; i < threadiness; i++ {
 		go wait.Until(c.runWorker, time.Second, stopCh)
-	}
-
-	c.isGateway, err = c.isEgressGateway(c.kubeclientset)
-	if err != nil {
-		glog.Fatalf("Failed to identify if the node is configured as egress traffic gateway: " + err.Error())
-	}
-
-	if c.isGateway {
-		glog.Info("Node is configured to egress traffic gateway")
-
-	} else {
-		glog.Info("Node is configured to egress traffic director")
-	}
-
-	if !c.isGateway {
-		c.gatewayAddress, err = c.getEgressGateway(c.kubeclientset)
-		if err != nil {
-			glog.Fatalf("Failed to identify the node that will be egress traffic gateway: " + err.Error())
-		}
-		if c.gatewayAddress == "" {
-			glog.Errorf("No nodes are configured to be egress gateway")
-		}
-		glog.Infof("Node %s is configured to egress traffic gateway", c.gatewayAddress)
 	}
 
 	glog.Info("Started workers")
@@ -278,8 +287,18 @@ func (c *Controller) syncHandler(key string) error {
 	}
 
 	glog.Info("Processing update to StaticEgressIP: " + key)
+
+	if c.isGateway {
+		return c.doGatewyProcessing(staticEgressIP)
+	} else {
+		return c.doDirectorProcessing(staticEgressIP)
+	}
+	return nil
+}
+
+func (c *Controller) doDirectorProcessing(staticEgressIP *egressipAPI.StaticEgressIP) error {
+
 	for i, rule := range staticEgressIP.Spec.Rules {
-		staticEgressIP, err := c.egressIPLister.StaticEgressIPs(namespace).Get(name)
 		endpoint, err := c.endpointsLister.Endpoints(staticEgressIP.Namespace).Get(rule.ServiceName)
 		if err != nil {
 			glog.Errorf("Failed to get endpoints object for service %s due to %s", rule.ServiceName, err.Error())
@@ -296,11 +315,29 @@ func (c *Controller) syncHandler(key string) error {
 		if err != nil {
 			glog.Errorf("Failed to setup routes to send the egress traffic to gateway", err.Error())
 		}
-		// Finally, we update the status block of the StaticEgressIP resource to reflect the
-		// current state of the world
-		err = c.updateStaticEgressIPStatus(staticEgressIP)
+	}
+
+	return nil
+}
+
+func (c *Controller) doGatewyProcessing(staticEgressIP *egressipAPI.StaticEgressIP) error {
+
+	for i, rule := range staticEgressIP.Spec.Rules {
+		endpoint, err := c.endpointsLister.Endpoints(staticEgressIP.Namespace).Get(rule.ServiceName)
 		if err != nil {
-			return err
+			glog.Errorf("Failed to get endpoints object for service %s due to %s", rule.ServiceName, err.Error())
+		}
+		ips := make([]string, 0)
+		for _, epSubset := range endpoint.Subsets {
+			for _, _ = range epSubset.Ports {
+				for _, addr := range epSubset.Addresses {
+					ips = append(ips, addr.IP)
+				}
+			}
+		}
+		err = c.trafficGateway.AddStaticIptablesRule(generateRuleId(staticEgressIP.Namespace, staticEgressIP.Name, i), ips, rule.Cidr, rule.EgressIP)
+		if err != nil {
+			glog.Errorf("Failed to setup rules to send egress traffic on gateway", err.Error())
 		}
 	}
 
@@ -311,10 +348,6 @@ func generateRuleId(namespace, staticEgressIpResourceName string, ruleNo int) st
 	hash := sha256.Sum256([]byte(namespace + staticEgressIpResourceName + strconv.Itoa(ruleNo)))
 	encoded := base32.StdEncoding.EncodeToString(hash[:])
 	return "EGRESS-IP-" + encoded[:16]
-}
-
-func (c *Controller) updateStaticEgressIPStatus(staticEgressIP *egressipAPI.StaticEgressIP) error {
-	return nil
 }
 
 func (c *Controller) addStaticEgressIP(obj interface{}) {
