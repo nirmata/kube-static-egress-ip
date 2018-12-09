@@ -33,6 +33,10 @@ spec:
 
 ## Getting Started
 
+### How it works
+
+Plese see the [design](./docs/design.md) details to understand how the egress traffic from the pods is sent across the cluster to achive static egress IP functionality.
+
 ### Installation
 
 *kube-static-egress-ip* is pretty easy to get started.
@@ -43,14 +47,19 @@ Instatll `staticegressip` custom resource definition by installing as bellow
 kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/crd.yaml
 ```
 
-Once you have installed custom resource you need to deploy CDR controller for `staticegressip` as below.
+You need to select one of the nodes (current implementation which will be enhanced) in the cluster to act as Egress Gateway by running below command. Egress gateway will be the node on which traffic from the pods that need static egress IP will be SNAT'ed. In the below e.g. `flannel-master` in the name of the node choosen the acts as gateway and `192.168.1.200` is optional IP of gateway node's IP address.
+
+```sh
+kubectl annotate node flannel-master  "nirmata.io/staticegressips-gateway=192.168.1.200"
+```
+
+Once you have installed custom resource and annotated a node to act as a gateway you need to deploy CDR controller for `staticegressip` as below.
 
 ```sh
 kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/controller.yaml
 ```
 
-
-kube-static-egress-ip` run as a daemonset so you should see a pod running on each of the cluster as below.
+`kube-static-egress-ip` run as a daemonset so you should see a pod running on each node of the cluster as below.
 
 ```sh
 # kubectl get nodes -o wide 
@@ -65,5 +74,4 @@ egressip-controller-cpbdn   1/1     Running   0          17h   192.168.1.201   f
 egressip-controller-hf5xm   1/1     Running   0          17h   192.168.1.202   falnnel-node2    <none>           <none>
 egressip-controller-xw8nh   1/1     Running   0          17h   192.168.1.200   flannel-master   <none>           <none>
 ```
-
-At this point you are all set to deploy `staticegressip` objects and see things in action. Please see an [example defintion](https://github.com/nirmata/kube-static-egress-ip/blob/master/config/example1.yaml) to how to define a `staticegressip` object
+At this point you are all set to deploy `staticegressip` objects and see things in action.
