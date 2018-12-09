@@ -35,6 +35,12 @@ spec:
 
 ### How it works
 
+*kube-static-egress-ip* is run as a daemon-set on the cluster. Each node takes a persona of a *director* or a *gateway*. Director redirects traffic from the pods that need static egress IP to one of the nodes in cluster acting as gateway. Gateway node is setup to perform SNAT of the traffic from the pods to use configured static egress IP as source IP. Return traffic is sent back to director running the pod. Following diagram depicts life of a packet originating from a pod that needs a static egress IP.
+
+<p align="left">
+  <img src="docs/img/static-egress-ip.jpg"> </image>
+</p>
+
 Plese see the [design](./docs/design.md) details to understand how the egress traffic from the pods is sent across the cluster to achive static egress IP functionality.
 
 ### Installation
