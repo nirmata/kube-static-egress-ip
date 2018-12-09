@@ -98,8 +98,22 @@ At this point you are all set to deploy `staticegressip` objects and see things 
 - Provide a solution that is higly available and resilient to Gateway node failures
 - Provide fine granularity to choose the set of pods by namespace, service or general label selectors etc in `staticegressip`  resource
 - does not compramise egress network policies enforcement
+- nodes that take the persona of Gateway can be automatically selected by leader election and does not require operators involvement
 
 ## Status
 
+Here is quick status of the project:
+
+- suppports CNI's that support direct routing of pod traffic to other nodes. Flannel host-gw backeend mode, Calico and kube-router can used
+- operator has to manually choose a node to act of Gateway by annotating the node
+- only single node acts as a gateway
+- no high-availability, if node acting as Gateway dies functionliaty no longer works.
+- egress IP's specified in the `staticegressip`are expected to be routable to the node acting as Gateway in the cluster
+
 ## Roadmap
+
+- support CNI's that provide overlay solution like Flannel with vxlan backend, Weave etc
+- support leader election among the nodes so that operator does not have to choose and configure a node a Gateway
+- support more than a single node to act as Gateway
+- when a node acting as Gateway dies, reconfigure so that a new node performs Gateway functionliaty.
 
