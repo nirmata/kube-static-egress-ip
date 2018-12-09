@@ -2,6 +2,9 @@
 
 Kubernetes CRD and controller to manage static egress IP addresses for workloads
 
+
+***Note: Project is in alpha state. We are activley working on improving the functionality and incorporating user feedback. Please see the roadmap. You are welcome and tryout and provide feedback.***
+
 ## Overview
 
 ### Problem Statement
