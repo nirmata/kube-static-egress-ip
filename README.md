@@ -90,3 +90,16 @@ egressip-controller-xw8nh   1/1     Running   0          17h   192.168.1.200   f
 ```
 
 At this point you are all set to deploy `staticegressip` objects and see things in action.
+
+## Goals
+
+- We intend to provide a generic solution that works across the CNI's like Flannel, Weave, Calico etc
+- Provide a scalable solution where the role of Gateway can be spread across more than one node
+- Provide a solution that is higly available and resilient to Gateway node failures
+- Provide fine granularity to choose the set of pods by namespace, service or general label selectors etc in `staticegressip`  resource
+- does not compramise egress network policies enforcement
+
+## Status
+
+## Roadmap
+
