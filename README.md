@@ -88,4 +88,5 @@ egressip-controller-cpbdn   1/1     Running   0          17h   192.168.1.201   f
 egressip-controller-hf5xm   1/1     Running   0          17h   192.168.1.202   falnnel-node2    <none>           <none>
 egressip-controller-xw8nh   1/1     Running   0          17h   192.168.1.200   flannel-master   <none>           <none>
 ```
+
 At this point you are all set to deploy `staticegressip` objects and see things in action.
