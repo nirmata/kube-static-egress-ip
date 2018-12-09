@@ -30,3 +30,40 @@ spec:
     service-name: frontend
     cidr: 4.2.2.2/32
 ```
+
+## Getting Started
+
+### Installation
+
+*kube-static-egress-ip* is pretty easy to get started.
+
+Instatll `staticegressip` custom resource definition by installing as bellow
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/crd.yaml
+```
+
+Once you have installed custom resource you need to deploy CDR controller for `staticegressip` as below.
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/controller.yaml
+```
+
+
+kube-static-egress-ip` run as a daemonset so you should see a pod running on each of the cluster as below.
+
+```sh
+# kubectl get nodes -o wide 
+NAME             STATUS   ROLES    AGE   VERSION   INTERNAL-IP     EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
+falnnel-node2    Ready    <none>   18h   v1.13.0   192.168.1.202   <none>        Ubuntu 16.04.5 LTS   4.4.0-116-generic   docker://17.3.2
+flannel-master   Ready    master   18h   v1.13.0   192.168.1.200   <none>        Ubuntu 16.04.5 LTS   4.4.0-116-generic   docker://17.3.2
+flannel-node1    Ready    <none>   18h   v1.13.0   192.168.1.201   <none>        Ubuntu 16.04.5 LTS   4.4.0-116-generic   docker://17.3.2
+#
+# kubectl get pods -o wide -n kube-system -l k8s-app="egressip-controller"
+NAME                        READY   STATUS    RESTARTS   AGE   IP              NODE             NOMINATED NODE   READINESS GATES
+egressip-controller-cpbdn   1/1     Running   0          17h   192.168.1.201   flannel-node1    <none>           <none>
+egressip-controller-hf5xm   1/1     Running   0          17h   192.168.1.202   falnnel-node2    <none>           <none>
+egressip-controller-xw8nh   1/1     Running   0          17h   192.168.1.200   flannel-master   <none>           <none>
+```
+
+At this point you are all set to deploy `staticegressip` objects and see things in action. Please see an [example defintion](https://github.com/nirmata/kube-static-egress-ip/blob/master/config/example1.yaml) to how to define a `staticegressip` object
