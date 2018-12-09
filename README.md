@@ -41,6 +41,14 @@ spec:
   <img src="docs/img/static-egress-ip.jpg"> </image>
 </p>
 
+- pod 2 sends traffic to a destination.
+- Node (is setup by `kube-static-egress-ip`) is setup redirect the packets to gateway node if pod 2 is sending traffic is sending to a specific destination
+- node acting as `gateway` recieves the traffic and perform SNAT (with configured egress IP) and sends out the packet to destination
+- node recieves the packet from destination
+- node performs DNAT (to pod IP) and forwards the packet to director node
+- node forwards the traffic to pod
+
+
 Plese see the [design](./docs/design.md) details to understand how the egress traffic from the pods is sent across the cluster to achive static egress IP functionality.
 
 ### Installation
