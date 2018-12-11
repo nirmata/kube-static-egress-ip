@@ -1,22 +1,22 @@
 # kube-static-egress-ip
 
-Kubernetes CRD and controller to manage static egress IP addresses for workloads
+A Kubernetes CRD to manage static egress IP addresses for workloads
 
-***Note: Project is in alpha stage. We are actively working on improving the functionality and incorporating the user feedback. Please see the roadmap. You are welcome to tryout and provide feedback.***
+***Note: This project is in alpha stage. We are actively working on improving the functionality and incorporating the user feedback. Please see the roadmap. You are welcome to tryout and provide feedback.***
 
 ## Overview
 
 ### Problem Statement
 
-Kubernetes [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) and [Services](https://kubernetes.io/docs/concepts/services-networking/service/) provides a in-built solution for exposing services run as workloads in the cluster to external clients outside of the cluster. You have fine granular control over which services are exposed, how they are exposed, who can access them etc. But what about the reverse direction? i.e) How the workloads running in the cluster can access the services outside cluster? Through egress network policies we have basic control of which pods can access what services, beyond that Kubernetes does not prescribe how the traffic is handled. Kubernetes CNI network [plug-ins](https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/network-plugins/) provides different functionalites to handle egress traffic from the pods.
+Kubernetes [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) and [Services](https://kubernetes.io/docs/concepts/services-networking/service/) provide a good solution for exposing services in the cluster to external clients outside of the cluster. With these constructs, you have fine granular control over which workloads (sets of pods) are exposed, how they are exposed, and who can access them. But what about managing traffic in the reverse direction? How can workloads running in the cluster securely access services outside cluster? Through egress network policies we have basic control of which pods can access what services. However, beyond that Kubernetes does not prescribe how egress traffic is handled. And, Kubernetes CNI network [plug-ins](https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/network-plugins/) provide varying functionalities to handle egress traffic from pods.
 
-One common functionality offered across CNI is to masqurade the egress traffic from the pods running on the node to use node IP as source IP for outbound traffic. As pod IP's are not necessarily routable from outside the cluster it provides a way for pods to communicate with outside the cluster. Its not uncommon in most on-premisis and cloud deployments to restrict access (white-listing the traffic)  to the services only to a know entities (for e.g IP's). For white-listing the traffic however this poses a challenge from security perspective for the workloads runnining in the Kubernetes cluster as there is no predictable egress IP that is used for the outbound traffic from the pods. It is highly desirable to fine-granular control on what IP is used for outbound traffic from the workloads (set of pods) running on the Kubernetes cluster.
+One common solution offered across CNIs is to masqurade egress traffic from pods running on a node, to use the node's IP as source IP for outbound traffic. As pod IP's are not necessarily routable from outside the cluster this provides a way for pods to communicate with services outside the cluster. It's not uncommon for most production grade on-premises or cloud deployments to restrict access (i.e. white-list traffic) to services, so that only trusted entities can access the service. This poses a challenge, from a security perspective, for the workloads running in the Kubernetes cluster as there is no predictable egress IP that is used for the outbound traffic from the pods. It is also highly desirable to have fine-grained control on what IP addresses are used for outbound traffic from a workload (set of pods) running on the Kubernetes cluster, as not all workloads in a cluster may be allowed to access the external service.
 
 ### Solution
 
-*kube-static-egress-ip* provides functionality with which operator can define set of pods whose outbound traffic to a specified destinations is always SNAT'ed to a configured static egress IP. *kube-static-egress-ip* provides this functionality in Kubernetes native way using custom rerources.
+*kube-static-egress-ip* provides a solution with which a cluster operator can define an egress rule where a set of pods whose outbound traffic to a specified destination is always SNAT'ed with a configured static egress IP. *kube-static-egress-ip* provides this functionality in Kubernetes native way using custom rerources.
 
-For e.g. below is sample definition of `staticegressip` custom resource defined by *kube-static-egress-ip*. In this case all the outbound traffic from the pods belonging to service `frontend` to destination IP `4.2.2.2` will be SNAT'ed to use 100.137.146.100 as source IP. So all the traffic from selected pods to 4.2.2.2 is seen as if they are all coming from 100.137.146.100
+For e.g. below is a sample definition of a `staticegressip` custom resource defined by *kube-static-egress-ip*. In this example all outbound traffic, from the pods belonging to service `frontend`, to destination IP `4.2.2.2` will be SNAT'ed to use 100.137.146.100 as source IP. So all the traffic from selected pods to 4.2.2.2 is seen as if they are all coming from 100.137.146.100
 
 ```yaml
 apiVersion: staticegressips.nirmata.io/v1alpha1
@@ -34,7 +34,7 @@ spec:
 
 ### How it works
 
-*kube-static-egress-ip* is run as a daemon-set on the cluster. Each node takes a persona of a *director* or a *gateway*. Director nodes redirect traffic from the pods that need static egress IP to one of the nodes in cluster acting as Gateway. Gateway node is setup to perform SNAT of the traffic from the pods to use configured static egress IP as source IP. Return traffic is sent back to Director node running the pod. Following diagram depicts life of a packet originating from a pod that needs a static egress IP.
+*kube-static-egress-ip* is run as a daemon-set on the cluster. Each node takes a role of a *director* or a *gateway*. Director nodes redirect traffic from the pods that need static egress IP to one of the nodes in cluster acting as Gateway. A Gateway node is setup to perform SNAT of the traffic from the pods to use configured static egress IP as the source IP. Return traffic is sent back to Director node running the pod. The following diagram depicts life of a packet originating from a pod that needs a static egress IP.
 
 <p align="center">
   <img src="docs/img/static-egress-ip.jpg"> </image>
@@ -51,21 +51,21 @@ Plese see the [design](./docs/design.md) details to understand in detail how the
 
 ### Installation
 
-*kube-static-egress-ip* is pretty easy to get started.
+*kube-static-egress-ip* is pretty easy to get started with.
 
-Instatll `staticegressip` custom resource definition by installing as bellow
+Install the `staticegressip` Custom Resource Definition (CRD) as follows:
 
 ```sh
 kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/crd.yaml
 ```
 
-You need to select one of the nodes (current implementation which will be enhanced) in the cluster to act as Egress Gateway by running below command. Egress gateway will be the node on which traffic from the pods that need static egress IP will be SNAT'ed. In the below e.g. `flannel-master` in the name of the node choosen the acts as gateway and `192.168.1.200` is optional IP of gateway node's IP address.
+You need to select one of the nodes (current limitation, which will be enhanced) in the cluster to act as Egress Gateway by running below command. The egress gateway will be the node on which traffic from the pods that need static egress IP will be SNAT'ed. In the below e.g. `flannel-master` in the name of the node choosen the acts as gateway and `192.168.1.200` is optional IP of gateway node's IP address.
 
 ```sh
 kubectl annotate node flannel-master  "nirmata.io/staticegressips-gateway=192.168.1.200"
 ```
 
-Once you have installed custom resource and annotated a node to act as a gateway you need to deploy CDR controller for `staticegressip` as below.
+Once you have installed the CRD and annotated a node to act as a gateway you need to deploy CRD controller for `staticegressip` as follows.
 
 ```sh
 kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/controller.yaml
@@ -91,7 +91,7 @@ At this point you are all set to deploy `staticegressip` objects and see things 
 
 ### `staticegressip` resources
 
-You will authour `staticegressip` resource object like any ther Kubernetes resource object
+You can then create a `staticegressip` resource object like any other Kubernetes resource object
 
 ```yaml
 spec:
@@ -101,21 +101,21 @@ spec:
     cidr: 4.2.2.2/32
 ```
 
-Spec consit of one or more `rule`'s. Each rule defines below"
-- service-name: name of the kubernetes service, whose endpoint pods are choosen for which this rule applies
-- cidr: rule to applied when selectio pod sends traffic to desintation matching this cidr
-- egressip: ip to which traffic should be SNAT hence providing static egress IP
+Spec consists of one or more `rule`'s. Each rule defines the following"
+- service-name: kubernetes service whose selected pods are the traffic source
+- cidr: the desitination address for the egress traffic from the selected pods
+- egressip: IP address to which traffic should be SNAT, hence providing a static egress IP
 
 Please modify provided [example](./config/example1.yaml) example manifest as per your setup to try out.
 
 ## Goals
 
-- We intend to provide a generic solution that works across the CNI's like Flannel, Weave, Calico etc
-- Provide a scalable solution where the role of Gateway can be spread across more than one node
-- Provide a solution that is higly available and resilient to Gateway node failures
-- Provide fine granularity to choose the set of pods by namespace, service or general label selectors etc in `staticegressip`  resource
-- does not compramise egress network policies enforcement
-- nodes that take the persona of Gateway can be automatically selected by leader election and does not require operators involvement
+- a generic solution that works across popular CNI's like Flannel, Weave, Calico etc
+- a scalable solution where the role of Gateway can be spread across more than one node
+- a solution that is higly available and resilient to node failures
+- fine grained controls to choose the set of pods by namespace, service or general label selectors etc in `staticegressip` resource
+- no compromise to egress network policies enforcement
+- automatically selection of node Gateway role, via leader election, which does not require manual involvement
 
 ## Status
 
@@ -123,7 +123,7 @@ Here is quick status of the project:
 
 - suppports CNI's that support direct routing of pod traffic to other nodes. Flannel host-gw backeend mode, Calico and kube-router can used
 - operator has to manually choose a node to act of Gateway by annotating the node
-- only single node acts as a gateway
+- only a single node acts as a gateway
 - no high-availability, if node acting as Gateway dies functionliaty no longer works.
 - egress IP's specified in the `staticegressip`are expected to be routable to the node acting as Gateway in the cluster
 - supports selection of pods selected by provided Kubernetes service name. 
