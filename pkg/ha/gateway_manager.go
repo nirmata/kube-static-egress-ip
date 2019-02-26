@@ -131,6 +131,12 @@ func (manager *GatewayManager) Run(stopCh <-chan struct{}) error {
 						continue
 					}
 					log.Printf("Gateway: %s is choosen for static egress ip %s\n", gatewayNode.Name, staticEgressIp.Name)
+					copyObj := staticEgressIp.DeepCopy()
+					copyObj.Status.Gateway = gatewayNode.Name
+					_, err = manager.egressIPclientset.StaticegressipsV1alpha1().StaticEgressIPs(staticEgressIp.Namespace).Update(copyObj)
+					if err != nil {
+						log.Printf("Failed to update Gateway: %s for static egress ip %s due to %s\n", gatewayNode.Name, staticEgressIp.Name, err.Error())
+					}
 				}
 			},
 			OnStoppedLeading: func() {
