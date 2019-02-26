@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: static-egress-ip-configmap
+  namespace: kube-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: static-egressip-controller
+  namespace: kube-system
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: static-egressip-controller
+  namespace: kube-system
+rules:
+  - apiGroups:
+    - ""
+    resources:
+      - configmaps
+    verbs:
+      - list
+      - get
+      - watch
+      - update
+  - apiGroups:
+    - ""
+    resources:
+      - nodes
+    verbs:
+      - list
+      - get
+      - watch
+  - apiGroups:
+    - "staticegressips.nirmata.io"
+    resources:
+      - staticegressips
+    verbs:
+      - list
+      - get
+      - watch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: static-egressip-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: static-egressip-controller
+subjects:
+- kind: ServiceAccount
+  name: static-egressip-controller
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: static-egressip-gateway-manager
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: static-egressip-gateway-manager
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        name: static-egressip-gateway-manager
+    spec:
+      serviceAccount: static-egressip-controller
+      serviceAccountName: static-egressip-controller
+      containers:
+      - name: static-egressip-gateway-manager
+        image: nirmata/static-egressip-gateway-manager:latest
+        imagePullPolicy: Always
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 100Mi

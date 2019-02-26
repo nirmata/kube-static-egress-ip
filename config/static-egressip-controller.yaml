@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: egressip-controller
+  name: static-egressip-controller
   namespace: kube-system
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1beta1
 metadata:
-  name: egressip-controller
+  name: static-egressip-controller
   namespace: kube-system
 rules:
   - apiGroups:
@@ -18,7 +18,6 @@ rules:
       - services
       - nodes
       - endpoints
-      - configmaps
     verbs:
       - list
       - get
@@ -35,43 +34,64 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1beta1
 metadata:
-  name: egressip-controller
+  name: static-egressip-controller
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: egressip-controller
+  name: static-egressip-controller
 subjects:
 - kind: ServiceAccount
-  name: egressip-controller
+  name: static-egressip-controller
   namespace: kube-system
 ---
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: extensions/v1beta1
+kind: DaemonSet
 metadata:
-  name: static-egressip-manager
+  labels:
+    k8s-app: static-egressip-controller
+    tier: node
+  name: static-egressip-controller
   namespace: kube-system
 spec:
-  selector:
-    matchLabels:
-      name: static-egressip-manager
-  replicas: 2
   template:
     metadata:
       labels:
-        name: static-egressip-manager
+        k8s-app: static-egressip-controller
+        tier: node
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
-      serviceAccount: egressip-controller
-      serviceAccountName: egressip-controller
+      serviceAccountName: static-egressip-controller
+      serviceAccount: static-egressip-controller
       containers:
-      - name: static-egressip-manager
-        image: nirmata/egressip-manager:latest
+      - name: static-egressip-controller
+        image: nirmata/static-egressip-controller:latest
         imagePullPolicy: Always
         env:
-        - name: POD_IP
+        - name: NODE_NAME
           valueFrom:
             fieldRef:
-              fieldPath: status.podIP
+              fieldPath: spec.nodeName
         resources:
           requests:
-            cpu: 50m
-            memory: 100Mi
+            cpu: 250m
+            memory: 250Mi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: iproute2
+          mountPath: /etc/iproute2
+      hostNetwork: true
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+      volumes:
+      - name: iproute2
+        hostPath:
+          path: /etc/iproute2
