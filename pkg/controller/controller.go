@@ -21,6 +21,7 @@ import (
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"time"
 
@@ -63,8 +64,6 @@ type Controller struct {
 	trafficDirector *director.EgressDirector
 	trafficGateway  *gateway.EgressGateway
 	workqueue       workqueue.RateLimitingInterface
-	isGateway       bool
-	gatewayAddress  string
 }
 
 // NewEgressIPController returns a new NewEgressIPController
@@ -107,45 +106,25 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	// Start the informer factories to begin populating the informer caches
 	glog.Info("Starting StaticEgressIP controller")
 
-	c.isGateway, err = c.isEgressGateway(c.kubeclientset)
+	c.trafficGateway, err = gateway.NewEgressGateway()
 	if err != nil {
-		glog.Fatalf("Failed to identify if the node is configured as egress traffic gateway: " + err.Error())
+		glog.Fatalf("Failed to setup node to act as egress traffic gateway: " + err.Error())
 	}
-
-	if c.isGateway {
-		glog.Info("Node is configured to egress traffic gateway")
-
-		c.trafficGateway, err = gateway.NewEgressGateway()
-		if err != nil {
-			glog.Fatalf("Failed to setup egress traffic gateway: " + err.Error())
-		}
-
-		err = c.trafficGateway.Setup()
-		if err != nil {
-			glog.Fatalf("Failed to setup egress traffic gateway: " + err.Error())
-		}
-	} else {
-		glog.Info("Node is configured to egress traffic director")
-
-		c.gatewayAddress, err = c.getEgressGateway(c.kubeclientset)
-		if err != nil {
-			glog.Fatalf("Failed to identify the node that will be egress traffic gateway: " + err.Error())
-		}
-		if c.gatewayAddress == "" {
-			glog.Errorf("No nodes are configured to be egress gateway")
-		}
-		glog.Infof("Node %s is configured to egress traffic gateway", c.gatewayAddress)
-
-		c.trafficDirector, err = director.NewEgressDirector()
-		if err != nil {
-			glog.Fatalf("Failed to setup egress traffic director: " + err.Error())
-		}
-
-		err = c.trafficDirector.Setup()
-		if err != nil {
-			glog.Fatalf("Failed to setup egress traffic director: " + err.Error())
-		}
+	err = c.trafficGateway.Setup()
+	if err != nil {
+		glog.Fatalf("Failed to setup node to act as egress traffic gateway: " + err.Error())
 	}
+	glog.Info("Configured node to act as a egress traffic gateway")
+
+	c.trafficDirector, err = director.NewEgressDirector()
+	if err != nil {
+		glog.Fatalf("Failed to setup node to act as egress traffic director: " + err.Error())
+	}
+	err = c.trafficDirector.Setup()
+	if err != nil {
+		glog.Fatalf("Failed to setup node to act as egress traffic director: " + err.Error())
+	}
+	glog.Info("Configured node to act as a egress traffic director")
 
 	// Wait for the caches to be synced before starting workers
 	glog.Info("Waiting for informer caches to sync")
@@ -164,39 +143,6 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	glog.Info("Shutting down workers")
 
 	return nil
-}
-
-// isEgressGateway returns true if node is configured as egress traffic gateway
-func (c *Controller) isEgressGateway(clientset kubernetes.Interface) (bool, error) {
-	nodeObject, err := utils.GetNodeObject(clientset, "")
-	if err != nil {
-		return false, err
-	}
-	_, ok := nodeObject.ObjectMeta.Annotations[egressGatewayAnnotaion]
-
-	return ok, nil
-}
-
-// getEgressGateway returns true if node is configured as egress traffic gateway
-func (c *Controller) getEgressGateway(clientset kubernetes.Interface) (string, error) {
-	nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
-	if err != nil {
-		return "", errors.New("Failed to list the nodes: " + err.Error())
-	}
-	for _, nodeObject := range nodes.Items {
-		gatewayIP, ok := nodeObject.ObjectMeta.Annotations[egressGatewayAnnotaion]
-		if ok {
-			if gatewayIP != "" {
-				return gatewayIP, nil
-			}
-			nodeIP, err := utils.GetNodeIP(&nodeObject)
-			if err != nil {
-				return "", errors.New("Failed to get node IP of the node marked for egress gateway: " + err.Error())
-			}
-			return nodeIP.String(), nil
-		}
-	}
-	return "", nil
 }
 
 // runWorker is a long-running function that will continually call the
@@ -276,24 +222,48 @@ func (c *Controller) syncHandler(key string) error {
 	// Get the StaticEgressIP resource with this namespace/name
 	staticEgressIP, err := c.egressIPLister.StaticEgressIPs(namespace).Get(name)
 	if err != nil {
-		// The StaticEgressIP resource may no longer exist, in which case we stop
-		// processing.
+		// The StaticEgressIP resource may no longer exist, in which case we stop processing
 		if k8serrors.IsNotFound(err) {
 			runtime.HandleError(fmt.Errorf("StaticEgressIP '%s' in work queue no longer exists", key))
 			return nil
 		}
-
 		return err
 	}
 
 	glog.Info("Processing update to StaticEgressIP: " + key)
+	if staticEgressIP.Status.Gateway == "" {
+		glog.Info("Gateway for forStaticEgressIP: " + key + " is not set yet, so ignoring the update")
+		return nil
+	}
 
-	if c.isGateway {
+	var isGateway bool
+	isGateway, err = c.isEgressGateway(c.kubeclientset, staticEgressIP)
+	if err != nil {
+		return errors.New("Failed to identify the gateway for static egress IP: " + key + " due to" + err.Error())
+
+	}
+	if isGateway {
 		return c.doGatewyProcessing(staticEgressIP)
 	} else {
 		return c.doDirectorProcessing(staticEgressIP)
 	}
 	return nil
+}
+
+// isEgressGateway returns true if node is configured as egress traffic gateway
+func (c *Controller) isEgressGateway(clientset kubernetes.Interface, staticEgressIP *egressipAPI.StaticEgressIP) (bool, error) {
+	nodeObject, err := utils.GetNodeObject(clientset, "")
+	if err != nil {
+		return false, err
+	}
+
+	var nodeIP net.IP
+	nodeIP, err = utils.GetNodeIP(nodeObject)
+	if err != nil {
+		return false, err
+	}
+
+	return staticEgressIP.Status.Gateway == nodeIP.String(), nil
 }
 
 func (c *Controller) doDirectorProcessing(staticEgressIP *egressipAPI.StaticEgressIP) error {
@@ -311,7 +281,7 @@ func (c *Controller) doDirectorProcessing(staticEgressIP *egressipAPI.StaticEgre
 				}
 			}
 		}
-		err = c.trafficDirector.AddRouteToGateway(generateRuleId(staticEgressIP.Namespace, staticEgressIP.Name, i), ips, rule.Cidr, c.gatewayAddress)
+		err = c.trafficDirector.AddRouteToGateway(generateRuleId(staticEgressIP.Namespace, staticEgressIP.Name, i), ips, rule.Cidr, staticEgressIP.Status.Gateway)
 		if err != nil {
 			glog.Errorf("Failed to setup routes to send the egress traffic to gateway", err.Error())
 		}
@@ -381,7 +351,7 @@ func (c *Controller) deleteStaticEgressIP(obj interface{}) {
 	glog.Infof("Deleting StaticEgressIP %s", staticEgressIP.Name)
 
 	for i, rule := range staticEgressIP.Spec.Rules {
-		err := c.trafficDirector.DeleteRouteToGateway(generateRuleId(staticEgressIP.Namespace, staticEgressIP.Name, i), rule.Cidr, c.gatewayAddress)
+		err := c.trafficDirector.DeleteRouteToGateway(generateRuleId(staticEgressIP.Namespace, staticEgressIP.Name, i), rule.Cidr, staticEgressIP.Status.Gateway)
 		if err != nil {
 			glog.Errorf("Failed to delete routes to send the egress traffic to gateway", err.Error())
 		}

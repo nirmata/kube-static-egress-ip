@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	egressipAPI "github.com/nirmata/kube-static-egress-ip/pkg/apis/egressip/v1alpha1"
 	clientset "github.com/nirmata/kube-static-egress-ip/pkg/client/clientset/versioned"
 	listers "github.com/nirmata/kube-static-egress-ip/pkg/client/listers/egressip/v1alpha1"
+	utils "github.com/nirmata/kube-static-egress-ip/pkg/utils"
 	v1core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -36,6 +38,10 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/transport"
+)
+
+const (
+	nodeRoleMasterLabel = "node-role.kubernetes.io/master"
 )
 
 // GatewayManager decides which node to act as gateway in the cluster
@@ -120,22 +126,35 @@ func (manager *GatewayManager) Run(stopCh <-chan struct{}) error {
 				// we're notified when we start - this is where you would
 				// usually put your code
 				log.Printf("%s: leading the gateway manager", id)
-				staticEgressIps, err := manager.egressIPLister.List(labels.Everything())
-				if err != nil {
-					log.Fatalf("Failed to list static egress IP custom resources from API server: %s", err.Error())
-				}
-				for _, staticEgressIp := range staticEgressIps {
-					gatewayNode, err := manager.chooseGateway(staticEgressIp)
-					if err != nil {
-						log.Printf("Failed to allocate a Gateway node for static egress IP custom resource: %s due to: %s", staticEgressIp.Name, err.Error())
-						continue
-					}
-					log.Printf("Gateway: %s is choosen for static egress ip %s\n", gatewayNode.Name, staticEgressIp.Name)
-					copyObj := staticEgressIp.DeepCopy()
-					copyObj.Status.Gateway = gatewayNode.Name
-					_, err = manager.egressIPclientset.StaticegressipsV1alpha1().StaticEgressIPs(staticEgressIp.Namespace).Update(copyObj)
-					if err != nil {
-						log.Printf("Failed to update Gateway: %s for static egress ip %s due to %s\n", gatewayNode.Name, staticEgressIp.Name, err.Error())
+				ticker := time.NewTicker(5 * time.Second)
+				for {
+					select {
+					case <-ticker.C:
+						staticEgressIps, err := manager.egressIPLister.List(labels.Everything())
+						if err != nil {
+							log.Fatalf("Failed to list static egress IP custom resources from API server: %s", err.Error())
+						}
+						for _, staticEgressIp := range staticEgressIps {
+							gatewayIP, err := manager.chooseGateway(staticEgressIp)
+							if err != nil {
+								log.Printf("Failed to allocate a Gateway node for static egress IP custom resource: %s due to: %s", staticEgressIp.Name, err.Error())
+								continue
+							}
+							if staticEgressIp.Status.Gateway != "" && staticEgressIp.Status.Gateway != gatewayIP {
+								log.Printf("Gateway for static egress IP %s changes from %s to %s", staticEgressIp.Name, staticEgressIp.Status.Gateway, gatewayIP)
+							}
+
+							log.Printf("Gateway: %s is choosen for static egress ip %s\n", gatewayIP, staticEgressIp.Name)
+							copyObj := staticEgressIp.DeepCopy()
+							copyObj.Status.Gateway = gatewayIP
+							_, err = manager.egressIPclientset.StaticegressipsV1alpha1().StaticEgressIPs(staticEgressIp.Namespace).Update(copyObj)
+							if err != nil {
+								log.Printf("Failed to update Gateway to %s for static egress ip %s due to %s\n", gatewayIP, staticEgressIp.Name, err.Error())
+							}
+						}
+					case <-ctx.Done():
+						ticker.Stop()
+						return
 					}
 				}
 			},
@@ -159,21 +178,66 @@ func (manager *GatewayManager) Run(stopCh <-chan struct{}) error {
 	return nil
 }
 
-func (manager *GatewayManager) chooseGateway(staticEgressIP *egressipAPI.StaticEgressIP) (*v1core.Node, error) {
+func (manager *GatewayManager) chooseGateway(staticEgressIP *egressipAPI.StaticEgressIP) (string, error) {
 
 	nodes, err := manager.kubeclientset.CoreV1().Nodes().List(metav1.ListOptions{})
 	if err != nil {
-		return nil, errors.New("Failed to list nodes from API server: " + err.Error())
+		return "", errors.New("Failed to list nodes from API server: " + err.Error())
 	}
 
+	var nodeIP net.IP
 	// check if staticEgressIP custom resource already has a gateway assigned
 	if staticEgressIP.Status.Gateway != "" {
 		for _, node := range nodes.Items {
-			if staticEgressIP.Status.Gateway == node.Name {
-				return &node, nil
+			nodeIP, err = utils.GetNodeIP(&node)
+			if err != nil {
+				return "", errors.New("Failed to get node IP to allocate gateway for static egress IP: " + staticEgressIP.Name + " due to " + err.Error())
+			}
+			if staticEgressIP.Status.Gateway == nodeIP.String() {
+				nodeReady := true
+				for _, cond := range node.Status.Conditions {
+					if cond.Type == v1core.NodeReady && cond.Status != v1core.ConditionTrue {
+						nodeReady = false
+					}
+				}
+				if nodeReady {
+					log.Printf("Current gateway node: %s is ready so keeping same node as gateway", node.Name)
+					return nodeIP.String(), nil
+				}
 			}
 		}
 	}
 
-	return &nodes.Items[0], nil
+	readyNodes := make([]string, 0)
+	for _, node := range nodes.Items {
+
+		_, isMaster := node.Labels[nodeRoleMasterLabel]
+		if isMaster {
+			continue
+		}
+
+		nodeReady := true
+		for _, cond := range node.Status.Conditions {
+			if cond.Type == v1core.NodeReady && cond.Status != v1core.ConditionTrue {
+				nodeReady = false
+				break
+			}
+		}
+		if nodeReady {
+			nodeIP, err = utils.GetNodeIP(&node)
+			if err != nil {
+				return "", errors.New("Failed to get node IP to allocate gateway for static egress IP: " + staticEgressIP.Name + " due to " + err.Error())
+			}
+			readyNodes = append(readyNodes, nodeIP.String())
+		} else {
+			log.Printf("Node: %s is not ready so skipping it from the list nodes for selecting gateway", node.Name)
+		}
+	}
+
+	if len(readyNodes) > 0 {
+		log.Printf("Selecting node: %s as gateway", readyNodes[0])
+		return readyNodes[0], nil
+	}
+
+	return "", errors.New("Failed to allocate gatewway as there are no ready nodes")
 }
