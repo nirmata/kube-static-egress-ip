@@ -309,6 +309,10 @@ func (c *Controller) doGatewyProcessing(staticEgressIP *egressipAPI.StaticEgress
 		if err != nil {
 			glog.Errorf("Failed to setup rules to send egress traffic on gateway", err.Error())
 		}
+		err = gateway.ConfigureStaticIP(rule.EgressIP + "/32")
+		if err != nil {
+			glog.Errorf("Failed to add egress IP %s for the staticegressip %s on the gateway due to %s", rule.EgressIP, staticEgressIP.Namespace+"/"+staticEgressIP.Name, err.Error())
+		}
 	}
 
 	return nil
