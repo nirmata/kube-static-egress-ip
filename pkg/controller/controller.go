@@ -283,7 +283,7 @@ func (c *Controller) doDirectorProcessing(staticEgressIP *egressipAPI.StaticEgre
 		}
 		err = c.trafficDirector.AddRouteToGateway(generateRuleId(staticEgressIP.Namespace, staticEgressIP.Name, i), ips, rule.Cidr, staticEgressIP.Status.Gateway)
 		if err != nil {
-			glog.Errorf("Failed to setup routes to send the egress traffic to gateway", err.Error())
+			glog.Errorf("Failed to setup routes to send the egress traffic to gateway due to %s", err.Error())
 		}
 	}
 
@@ -332,10 +332,66 @@ func (c *Controller) addStaticEgressIP(obj interface{}) {
 }
 
 func (c *Controller) updateStaticEgressIP(old, current interface{}) {
-	oldEgressIPObj := old.(*egressipAPI.StaticEgressIP)
-	newEgressIPObj := current.(*egressipAPI.StaticEgressIP)
-	glog.Infof("Updating StaticEgressIP: %s/%s", oldEgressIPObj.Namespace, oldEgressIPObj.Name)
-	c.enqueueStaticEgressIP(newEgressIPObj)
+	oldStaticEgressIPObj := old.(*egressipAPI.StaticEgressIP)
+	newStaticEgressIPObj := current.(*egressipAPI.StaticEgressIP)
+	glog.Infof("Updating StaticEgressIP: %s/%s", oldStaticEgressIPObj.Namespace, oldStaticEgressIPObj.Name)
+
+	if oldStaticEgressIPObj.Status.Gateway != "" && newStaticEgressIPObj.Status.Gateway != "" {
+		if oldStaticEgressIPObj.Status.Gateway != newStaticEgressIPObj.Status.Gateway {
+			wasGateway, err := c.isEgressGateway(c.kubeclientset, oldStaticEgressIPObj)
+			if err != nil {
+				glog.Errorf("Failed to identify the gateway for static egress IP %s/%s due to %s", oldStaticEgressIPObj.Namespace, oldStaticEgressIPObj.Name, err.Error())
+
+			}
+			isGateway, err := c.isEgressGateway(c.kubeclientset, newStaticEgressIPObj)
+			if err != nil {
+				glog.Errorf("Failed to identify the gateway for static egress IP %s/%s due to %s", newStaticEgressIPObj.Namespace, newStaticEgressIPObj.Name, err.Error())
+
+			}
+			if wasGateway {
+				glog.Infof("Transistioning node from gateway to director for the staticegressip: %s/%s\n", newStaticEgressIPObj.Namespace, newStaticEgressIPObj.Name)
+			}
+			if isGateway {
+				glog.Infof("Transistioning node from director to gateway for the staticegressip: %s/%s\n", newStaticEgressIPObj.Namespace, newStaticEgressIPObj.Name)
+			}
+			for i, rule := range oldStaticEgressIPObj.Spec.Rules {
+				endpoint, err := c.endpointsLister.Endpoints(oldStaticEgressIPObj.Namespace).Get(rule.ServiceName)
+				if err != nil {
+					glog.Errorf("Failed to get endpoints object for service %s due to %s", rule.ServiceName, err.Error())
+				}
+				ips := make([]string, 0)
+				for _, epSubset := range endpoint.Subsets {
+					for _, _ = range epSubset.Ports {
+						for _, addr := range epSubset.Addresses {
+							ips = append(ips, addr.IP)
+						}
+					}
+				}
+				if wasGateway {
+					err = c.trafficGateway.ClearStaticIptablesRule(generateRuleId(oldStaticEgressIPObj.Namespace, oldStaticEgressIPObj.Name, i), rule.Cidr, rule.EgressIP)
+					if err != nil {
+						glog.Errorf("Failed to cleanup old rules configured for gateway", err.Error())
+					}
+					err = gateway.RemoveStaticIP(rule.EgressIP + "/32")
+					if err != nil {
+						glog.Errorf("Failed to add egress IP %s for the staticegressip %s on the gateway due to %s", rule.EgressIP, oldStaticEgressIPObj.Namespace+"/"+oldStaticEgressIPObj.Name, err.Error())
+					}
+				}
+				if isGateway {
+					err = c.trafficDirector.ClaerStaleRouteToGateway(generateRuleId(oldStaticEgressIPObj.Namespace, oldStaticEgressIPObj.Name, i), rule.Cidr, rule.EgressIP)
+					if err != nil {
+						glog.Errorf("Failed to cleanup old rules configured for gateway", err.Error())
+					}
+					err = gateway.RemoveStaticIP(rule.EgressIP + "/32")
+					if err != nil {
+						glog.Errorf("Failed to add egress IP %s for the staticegressip %s on the gateway due to %s", rule.EgressIP, oldStaticEgressIPObj.Namespace+"/"+oldStaticEgressIPObj.Name, err.Error())
+					}
+				}
+
+			}
+		}
+	}
+	c.enqueueStaticEgressIP(newStaticEgressIPObj)
 }
 
 func (c *Controller) deleteStaticEgressIP(obj interface{}) {

@@ -149,6 +149,40 @@ func (gateway *EgressGateway) DeleteStaticIptablesRule(setName string, destinati
 	return nil
 }
 
+// DeleteStaticIptablesRule clears IPtables rules added by AddStaticIptablesRule
+func (gateway *EgressGateway) ClearStaticIptablesRule(setName string, destinationIP, egressIP string) error {
+
+	// delete rule in NAT postrouting to SNAT traffic
+	ruleSpec := []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "SNAT", "--to-source", egressIP}
+	if err := gateway.deleteRule(defaultNATIptable, egressGatewayNATChainName, ruleSpec...); err != nil {
+		return fmt.Errorf("failed to delete rule in chain %v err %v", egressGatewayNATChainName, err)
+	}
+
+	// delete rule in FORWARD chain of filter table
+	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	hasRule, err := gateway.ipt.Exists("filter", egressGatewayFWChainName, ruleSpec...)
+	if err != nil {
+		return errors.New("Failed to verify rule exists in " + egressGatewayFWChainName + " chain of filter table" + err.Error())
+	}
+	if hasRule {
+		err = gateway.ipt.Delete("filter", egressGatewayFWChainName, ruleSpec...)
+		if err != nil {
+			return errors.New("Failed to delete iptables command to ACCEPT traffic from director nodes to get forwarded" + err.Error())
+		}
+	}
+
+	set, err := ipset.New(setName, "hash:ip", &ipset.Params{})
+	if err != nil {
+		return errors.New("Failed to get ipset with name " + setName + " due to %" + err.Error())
+	}
+	err = set.Destroy()
+	if err != nil {
+		return errors.New("Failed to delete ipset due to " + err.Error())
+	}
+
+	return nil
+}
+
 /*
 // AddSourceIP
 func (m *EgressGateway) AddSourceIP(ip string) error {
