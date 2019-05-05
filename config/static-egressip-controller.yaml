@@ -1,0 +1,51 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  labels:
+    k8s-app: static-egressip-controller
+    tier: node
+  name: static-egressip-controller
+  namespace: kube-system
+spec:
+  template:
+    metadata:
+      labels:
+        k8s-app: static-egressip-controller
+        tier: node
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      serviceAccountName: static-egressip-controller
+      serviceAccount: static-egressip-controller
+      containers:
+      - name: static-egressip-controller
+        image: nirmata/static-egressip-controller:latest
+        imagePullPolicy: Always
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            cpu: 250m
+            memory: 250Mi
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: iproute2
+          mountPath: /etc/iproute2
+      hostNetwork: true
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+      volumes:
+      - name: iproute2
+        hostPath:
+          path: /etc/iproute2

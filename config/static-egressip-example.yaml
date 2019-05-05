@@ -1,0 +1,9 @@
+apiVersion: staticegressips.nirmata.io/v1alpha1
+kind: StaticEgressIP
+metadata:
+  name: test
+spec:
+  rules:
+  - egressip: 192.168.1.100
+    service-name: frontend
+    cidr: 4.2.2.2/32

@@ -22,6 +22,15 @@ func ConfigureStaticIP(staticVIP string) error {
 	return addSecondaryIPToInterface(staticVIP, interfaceName)
 }
 
+func RemoveStaticIP(staticVIP string) error {
+
+	interfaceName, err := getInterfaceForNetwork(staticVIP)
+	if err != nil {
+		return err
+	}
+	return removeSecondaryIPToInterface(staticVIP, interfaceName)
+}
+
 // getInterfaceForNetwork returns interface name within same network as staticIP
 func getInterfaceForNetwork(staticIPAddr string) (string, error) {
 
@@ -82,4 +91,17 @@ func addSecondaryIPToInterface(staticIP string, name string) error {
 		return fmt.Errorf("failed to get link by name %v", err)
 	}
 	return netlink.AddrAdd(link, addr)
+}
+
+func removeSecondaryIPToInterface(staticIP string, name string) error {
+
+	addr, err := netlink.ParseAddr(staticIP)
+	if err != nil {
+		return fmt.Errorf("failed to parse static IP err %v", err)
+	}
+	link, err := netlink.LinkByName(name)
+	if err != nil {
+		return fmt.Errorf("failed to get link by name %v", err)
+	}
+	return netlink.AddrDel(link, addr)
 }

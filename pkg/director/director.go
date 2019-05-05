@@ -143,6 +143,7 @@ func (d *EgressDirector) AddRouteToGateway(setName string, sourceIPs []string, d
 	if err != nil {
 		return errors.New("Failed to verify required default route to gatewat exists. " + err.Error())
 	}
+
 	if !strings.Contains(string(out), destinationIP) {
 		if err = exec.Command("ip", "route", "add", destinationIP, "via", egressGateway, "table", customStaticEgressIPRouteTableName).Run(); err != nil {
 			return errors.New("Failed to add route in custom route table due to: " + err.Error())
@@ -204,6 +205,50 @@ func (d *EgressDirector) DeleteRouteToGateway(setName string, destinationIP, egr
 	err = set.Destroy()
 	if err != nil {
 		return errors.New("Failed to delete ipset due to " + err.Error())
+	}
+
+	return nil
+}
+
+func (d *EgressDirector) ClaerStaleRouteToGateway(setName string, destinationIP, egressGateway string) error {
+
+	// create iptables rule in mangle table PREROUTING chain to match src to ipset created and destination
+	// matching  destinationIP then fwmark the packets
+	ruleSpec := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
+	hasRule, err := d.ipt.Exists("mangle", "PREROUTING", ruleSpec...)
+	if err != nil {
+		return errors.New("Failed to verify rule exists in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
+	}
+	if hasRule {
+		err = d.ipt.Delete("mangle", "PREROUTING", ruleSpec...)
+		if err != nil {
+			return errors.New("Failed to delete rule in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
+		}
+		glog.Infof("deleted rule in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP")
+	}
+
+	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, ruleSpec...)
+	if err != nil {
+		return errors.New("Failed to verify rule exists in BYPASS_CNI_MASQURADE chain of nat table to bypass the CNI masqurade" + err.Error())
+	}
+	if hasRule {
+		err = d.ipt.Delete("nat", bypassCNIMasquradeChainName, ruleSpec...)
+		if err != nil {
+			return errors.New("Failed to delete iptables command to add a rule to ACCEPT traffic in BYPASS_CNI_MASQURADE chain" + err.Error())
+		}
+	}
+
+	// add routing entry in custom routing table to forward destinationIP to egressGateway
+	out, err := exec.Command("ip", "route", "list", "table", customStaticEgressIPRouteTableName).Output()
+	if err != nil {
+		return errors.New("Failed to verify required default route to gatewat exists. " + err.Error())
+	}
+	if !strings.Contains(string(out), destinationIP) {
+		if err = exec.Command("ip", "route", "delete", destinationIP, "via", egressGateway, "table", customStaticEgressIPRouteTableName).Run(); err != nil {
+			return errors.New("Failed to delete route in custom route table due to: " + err.Error())
+		}
+		glog.Infof("deleted route")
 	}
 
 	return nil
