@@ -56,35 +56,47 @@ Plese see the [design](./docs/design.md) details to understand in detail how the
 Install the `staticegressip` Custom Resource Definition (CRD) as follows:
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/crd.yaml
+kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/static-egressip-crd.yaml
 ```
 
-You need to select one of the nodes (current limitation, which will be enhanced) in the cluster to act as Egress Gateway by running below command. The egress gateway will be the node on which traffic from the pods that need static egress IP will be SNAT'ed. In the below e.g. `flannel-master` in the name of the node choosen the acts as gateway and `192.168.1.200` is optional IP of gateway node's IP address.
+Create necessary RBAC to run the controllers
 
 ```sh
-kubectl annotate node flannel-master  "nirmata.io/staticegressips-gateway=192.168.1.200"
+kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/static-egressip-rbac.yaml
 ```
 
-Once you have installed the CRD and annotated a node to act as a gateway you need to deploy CRD controller for `staticegressip` as follows.
+Next you need to install deployment for `static-egressip-gateway-manager` which automatically selects nodes to act as gateway for a `StaticEgressIP` custom resource
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/controller.yaml
+kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/static-egressip-gateway-manager.yaml
 ```
 
-`kube-static-egress-ip` run as a daemonset so you should see a pod running on each node of the cluster as below.
+You shall see the pod running for the deployment created for `static-egressip-gateway-manager`
+
+```
+kubectl get pods -o wide -n kube-system -l name=static-egressip-gateway-manager                                                                                                                                                                                                           ❯❯❯
+NAME                                              READY     STATUS    RESTARTS   AGE       IP             NODE            NOMINATED NODE   READINESS GATES
+static-egressip-gateway-manager-d665565cb-hwrts   1/1       Running   0          25m       10.244.2.208   falnnel-node2   <none>           <none>
+static-egressip-gateway-manager-d665565cb-qtnms   1/1       Running   0          25m       10.244.1.187   flannel-node1   <none>           <none>
+static-egressip-gateway-manager-d665565cb-xwdgr   1/1       Running   0          25m       10.244.1.186   flannel-node1   <none>           <none>
+
+```
+
+Finally you need to install a daemonset which runs `static-egressip-controller` on each node configures a node to act as director or gateway for a `StaticEgressIP` custom resource.
 
 ```sh
-# kubectl get nodes -o wide 
-NAME             STATUS   ROLES    AGE   VERSION   INTERNAL-IP     EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
-falnnel-node2    Ready    <none>   18h   v1.13.0   192.168.1.202   <none>        Ubuntu 16.04.5 LTS   4.4.0-116-generic   docker://17.3.2
-flannel-master   Ready    master   18h   v1.13.0   192.168.1.200   <none>        Ubuntu 16.04.5 LTS   4.4.0-116-generic   docker://17.3.2
-flannel-node1    Ready    <none>   18h   v1.13.0   192.168.1.201   <none>        Ubuntu 16.04.5 LTS   4.4.0-116-generic   docker://17.3.2
-#
-# kubectl get pods -o wide -n kube-system -l k8s-app="egressip-controller"
-NAME                        READY   STATUS    RESTARTS   AGE   IP              NODE             NOMINATED NODE   READINESS GATES
-egressip-controller-cpbdn   1/1     Running   0          17h   192.168.1.201   flannel-node1    <none>           <none>
-egressip-controller-hf5xm   1/1     Running   0          17h   192.168.1.202   falnnel-node2    <none>           <none>
-egressip-controller-xw8nh   1/1     Running   0          17h   192.168.1.200   flannel-master   <none>           <none>
+kubectl apply -f https://raw.githubusercontent.com/nirmata/kube-static-egress-ip/master/config/static-egressip-controller.yaml
+```
+
+You shall see the pods running on each node of the cluster. For e.g.
+
+```
+kubectl get pods -o wide -n kube-system -l k8s-app=static-egressip-controller                                                                                                                                                                                                             ❯❯❯
+NAME                               READY     STATUS    RESTARTS   AGE       IP              NODE             NOMINATED NODE   READINESS GATES
+static-egressip-controller-jbgf5   1/1       Running   0          20m       192.168.1.201   flannel-node1    <none>           <none>
+static-egressip-controller-k4w59   1/1       Running   0          20m       192.168.1.200   flannel-master   <none>           <none>
+static-egressip-controller-lhn5l   1/1       Running   0          20m       192.168.1.202   falnnel-node2    <none>           <none>
+
 ```
 
 At this point you are all set to deploy `staticegressip` objects and see things in action.
@@ -106,7 +118,7 @@ Spec consists of one or more `rule`'s. Each rule defines the following"
 - cidr: the desitination address for the egress traffic from the selected pods
 - egressip: IP address to which traffic should be SNAT, hence providing a static egress IP
 
-Please modify provided [example](./config/example1.yaml) example manifest as per your setup to try out.
+Please modify provided [example](./config/static-egressip-example.yaml) example manifest as per your setup to try out.
 
 ## Goals
 
