@@ -45,7 +45,8 @@ type Rule struct {
 
 // StaticEgressIPStatus is the status for a StaticEgressIP resource
 type StaticEgressIPStatus struct {
-	Gateway string `json:"gateway"`
+	GatewayNode string `json:"gateway-node"`
+	GatewayIP string `json:"gateway-ip"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
