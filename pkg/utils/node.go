@@ -57,3 +57,29 @@ func GetNodeIP(node *apiv1.Node) (net.IP, error) {
 	}
 	return nil, errors.New("host IP unknown")
 }
+
+// GetGatewayIP is used to get the IP that needs to be used to direct the
+// traffic from the director nodes to the gateway node. IP that will be picked
+// will be based on the CNI used and if it direct routing or overlay. In case
+// of ovarlays IP from the pod CIDR that is associated with the gateway node
+// will be used
+func GetGatewayIP() (string, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+	for _, iface := range ifaces {
+		if iface.Name == "flannel.1" {
+			addresses, err := iface.Addrs()
+			if err != nil {
+				return "", err
+			}
+			addr, _, err := net.ParseCIDR(addresses[0].String())
+			if err != nil {
+				return "", err
+			}
+			return addr.String(), nil
+		}
+	}
+	return "", nil
+}
