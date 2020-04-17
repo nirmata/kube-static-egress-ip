@@ -31,3 +31,10 @@ spec:
                         type: string
                       cidr:
                         type: string
+            status:
+              type: object
+              properties:
+                gateway-node:
+                  type: string
+                gateway-ip:
+                  type: string
