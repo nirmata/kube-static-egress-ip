@@ -1,0 +1,16 @@
+language: go
+go:
+  - 1.12.x
+
+branches:
+  only: 
+    - master
+    - /^v\d+\.\d+(\.\d+)?(-\S*)?$/
+    - /^PR\d*$/
+
+env:
+  global:
+    - REPO=nirmata/kube-static-egress-ip
+    - REPO_PATH=$HOME/gopath/src/github.com/$REPO
+    - GIT_BRANCH=$TRAVIS_BRANCH
+
