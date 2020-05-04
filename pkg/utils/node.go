@@ -58,6 +58,19 @@ func GetNodeIP(node *apiv1.Node) (net.IP, error) {
 	return nil, errors.New("host IP unknown")
 }
 
+// GetNodeIPByNodeName returns the most valid external facing IP address for a node given its name.
+func GetNodeIPByNodeName(clientset kubernetes.Interface, nodeName string) (net.IP, error) {
+	node, err := clientset.Core().Nodes().Get(nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	nodeIP, err := GetNodeIP(node)
+	if err != nil {
+		return nil, err
+	}
+	return nodeIP, nil
+}
+
 // GetGatewayIP is used to get the IP that needs to be used to direct the
 // traffic from the director nodes to the gateway node. IP that will be picked
 // will be based on the CNI used and if it direct routing or overlay. In case

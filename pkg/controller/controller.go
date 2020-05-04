@@ -21,7 +21,10 @@ import (
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang/glog"
@@ -45,8 +48,9 @@ import (
 )
 
 const (
-	controllerAgentName    = "egressip-controller"
-	egressGatewayAnnotaion = "nirmata.io/staticegressips-gateway"
+	controllerAgentName                = "egressip-controller"
+	egressGatewayAnnotaion             = "nirmata.io/staticegressips-gateway"
+	customStaticEgressIPRouteTableName = "kube-static-egress-ip"
 )
 
 // Controller is the controller implementation for StaticEgressIP resources
@@ -63,6 +67,7 @@ type Controller struct {
 	trafficDirector *director.EgressDirector
 	trafficGateway  *gateway.EgressGateway
 	workqueue       workqueue.RateLimitingInterface
+	nodeIP          string
 }
 
 // NewEgressIPController returns a new NewEgressIPController
@@ -72,12 +77,16 @@ func NewEgressIPController(
 	endpointsInformer coreinformers.EndpointsInformer,
 	egressIPInformer informers.StaticEgressIPInformer) *Controller {
 
+	nodeObject, _ := utils.GetNodeObject(kubeclientset, "")
+	nodeIP, _ := utils.GetNodeIP(nodeObject)
+
 	controller := &Controller{
 		kubeclientset:     kubeclientset,
 		egressIPclientset: egressIPclientset,
 		egressIPLister:    egressIPInformer.Lister(),
 		endpointsLister:   endpointsInformer.Lister(),
 		egressIPsSynced:   egressIPInformer.Informer().HasSynced,
+		nodeIP:            nodeIP.String(),
 		workqueue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "StaticEgressIPs"),
 	}
 
@@ -102,6 +111,15 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 
 	var err error
 
+	err = ioutil.WriteFile("/proc/sys/net/ipv4/conf/all/rp_filter", []byte(strconv.Itoa(0)), 0640)
+	if err != nil {
+		glog.Errorf("Failed to disable rp_filter /proc/sys/net/ipv4/conf/all/rp_filter")
+	}
+	err = ioutil.WriteFile("/proc/sys/net/ipv4/conf/default/rp_filter", []byte(strconv.Itoa(0)), 0640)
+	if err != nil {
+		glog.Errorf("Failed to disable rp_filter /proc/sys/net/ipv4/conf/all/rp_filter")
+	}
+	glog.Info("Disabled rp_filter")
 	// Start the informer factories to begin populating the informer caches
 	glog.Info("Starting StaticEgressIP controller")
 
@@ -115,7 +133,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	}
 	glog.Info("Configured node to act as a egress traffic gateway")
 
-	c.trafficDirector, err = director.NewEgressDirector()
+	c.trafficDirector, err = director.NewEgressDirector(c.kubeclientset)
 	if err != nil {
 		glog.Fatalf("Failed to setup node to act as egress traffic director: " + err.Error())
 	}
@@ -287,17 +305,17 @@ func (c *Controller) doDirectorProcessing(clientset kubernetes.Interface, static
 
 func (c *Controller) doGatewyProcessing(clientset kubernetes.Interface, staticEgressIP *egressipAPI.StaticEgressIP) error {
 
-	gatewayIP, err := utils.GetGatewayIP()
-	if err != nil {
-		return err
-	}
-	copyObj := staticEgressIP.DeepCopy()
-	copyObj.Status.GatewayIP = gatewayIP
-	_, err = c.egressIPclientset.StaticegressipsV1alpha1().StaticEgressIPs(staticEgressIP.Namespace).Update(copyObj)
-	if err != nil {
-		glog.Infof("Failed to update GatewayIP to %s for static egress ip %s due to %s\n", gatewayIP, staticEgressIP.Name, err.Error())
-	}
-
+	/*	gatewayIP, err := utils.GetGatewayIP()
+		if err != nil {
+			return err
+		}
+		copyObj := staticEgressIP.DeepCopy()
+		copyObj.Status.GatewayIP = gatewayIP
+		_, err = c.egressIPclientset.StaticegressipsV1alpha1().StaticEgressIPs(staticEgressIP.Namespace).Update(copyObj)
+		if err != nil {
+			glog.Infof("Failed to update GatewayIP to %s for static egress ip %s due to %s\n", gatewayIP, staticEgressIP.Name, err.Error())
+		}
+	*/
 	for i, rule := range staticEgressIP.Spec.Rules {
 		endpoint, err := c.endpointsLister.Endpoints(staticEgressIP.Namespace).Get(rule.ServiceName)
 		if err != nil {
@@ -308,6 +326,41 @@ func (c *Controller) doGatewyProcessing(clientset kubernetes.Interface, staticEg
 			for _, _ = range epSubset.Ports {
 				for _, addr := range epSubset.Addresses {
 					ips = append(ips, addr.IP)
+					endpointNodeIP, err := utils.GetNodeIPByNodeName(clientset, *addr.NodeName)
+					if err != nil {
+						glog.Errorf("Failed to get endpoint's node IP while setting up rules to send egress traffic on gateway: %s", err.Error())
+						continue
+					}
+					// create a tunnel interface to gateway node if does not exist
+					tunnelName := "tun" + strings.Replace(endpointNodeIP.String(), ".", "", -1)
+					out, err := exec.Command("ip", "link", "list").Output()
+					if err != nil {
+						return errors.New("Failed to verify required tunnel to director node exists. " + err.Error())
+					}
+					// skip endpoints that are local to this gateway node
+					if endpointNodeIP.String() == c.nodeIP {
+						continue
+					}
+					if !strings.Contains(string(out), tunnelName) {
+						// ip tunnel add seip mode gre remote 192.168.1.102 local 192.168.1.101
+						if err = exec.Command("ip", "tunnel", "add", tunnelName, "mode", "gre", "remote", endpointNodeIP.String(), "local", c.nodeIP).Run(); err != nil {
+							return errors.New("Failed to tunnel interface to gateway node due to: " + err.Error())
+						}
+					}
+					if err = exec.Command("ip", "link", "set", "up", tunnelName).Run(); err != nil {
+						return errors.New("Failed to set tunnel interface to up due to: " + err.Error())
+					}
+					// add routing entry in custom routing table to forward destinationIP to egressGateway
+					out, err = exec.Command("ip", "route", "list", "table", customStaticEgressIPRouteTableName).Output()
+					if err != nil {
+						return errors.New("Failed to verify required default route to gatewat exists. " + err.Error())
+					}
+
+					if !strings.Contains(string(out), addr.IP) {
+						if err = exec.Command("ip", "route", "add", addr.IP, "dev", tunnelName, "table", customStaticEgressIPRouteTableName).Run(); err != nil {
+							return errors.New("Failed to add route in custom route table due to: " + err.Error())
+						}
+					}
 				}
 			}
 		}
