@@ -22,6 +22,7 @@ const (
 	defaultEgressChainName    = "STATIC-EGRESS-IP-CHAIN"
 	egressGatewayFWChainName  = "STATIC-EGRESS-FORWARD-CHAIN"
 	defaultPostRoutingChain   = "POSTROUTING"
+	staticEgressIPFWMARK      = "1000"
 )
 
 // NewEgressGateway is a constructor for EgressGateway interface
@@ -111,6 +112,22 @@ func (gateway *EgressGateway) AddStaticIptablesRule(setName string, sourceIPs []
 	if err := gateway.insertRule(defaultNATIptable, egressGatewayNATChainName, 1, ruleSpec...); err != nil {
 		return fmt.Errorf("failed to insert rule to chain %v err %v", defaultPostRoutingChain, err)
 	}
+
+	// create iptables rule in mangle table PREROUTING chain to match to inbound return traffic to static egress IP
+	// matching  destinationIP then fwmark the packets
+	ruleSpec = []string{"-s", destinationIP, "-d", egressIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
+	hasRule, err = gateway.ipt.Exists("mangle", "PREROUTING", ruleSpec...)
+	if err != nil {
+		return errors.New("Failed to verify rule exists in PREROUTING chain of mangle table to fwmark inbound return traffic to static egress IP" + err.Error())
+	}
+	if !hasRule {
+		err = gateway.ipt.Insert("mangle", "PREROUTING", 1, ruleSpec...)
+		if err != nil {
+			return errors.New("Failed to add rule in PREROUTING chain of mangle table to fwmark inbound return traffic to static egress IP" + err.Error())
+		}
+		glog.Infof("added rule in PREROUTING chain of mangle table to fwmark inbound return traffic to static egress IP")
+	}
+	glog.Infof("iptables rule in mangle table PREROUTING chain to match src to ipset")
 
 	return nil
 }
