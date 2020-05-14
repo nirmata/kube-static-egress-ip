@@ -245,7 +245,7 @@ func (d *EgressDirector) DeleteRouteToGateway(setName string, destinationIP, egr
 	return nil
 }
 
-func (d *EgressDirector) ClaerStaleRouteToGateway(setName string, destinationIP, egressGateway string) error {
+func (d *EgressDirector) ClearStaleRouteToGateway(setName string, destinationIP, egressGateway string) error {
 
 	// create iptables rule in mangle table PREROUTING chain to match src to ipset created and destination
 	// matching  destinationIP then fwmark the packets
