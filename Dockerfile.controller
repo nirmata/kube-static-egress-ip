@@ -12,7 +12,7 @@ WORKDIR /workspace/golang/src/github.com/nirmata/kube-static-egress-ip/cmd/stati
 RUN CGO_ENABLED=0 go install -ldflags "-s" -v
 
 FROM alpine:3.8
-RUN apk --no-cache add iproute2 iptables ipset
+RUN apk --no-cache add iproute2 iptables ip6tables ipset
 WORKDIR /root/
 COPY --from=builder /workspace/golang/bin/static-egressip-controller /usr/local/bin/static-egressip-controller
 
