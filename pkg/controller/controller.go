@@ -437,7 +437,7 @@ func (c *Controller) updateStaticEgressIP(old, current interface{}) {
 					}
 				}
 				if isGateway {
-					err = c.trafficDirector.ClaerStaleRouteToGateway(generateRuleId(oldStaticEgressIPObj.Namespace, oldStaticEgressIPObj.Name, i), rule.Cidr, rule.EgressIP)
+					err = c.trafficDirector.ClearStaleRouteToGateway(generateRuleId(oldStaticEgressIPObj.Namespace, oldStaticEgressIPObj.Name, i), rule.Cidr, rule.EgressIP)
 					if err != nil {
 						glog.Errorf("Failed to cleanup old rules configured for gateway", err.Error())
 					}
