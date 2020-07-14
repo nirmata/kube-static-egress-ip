@@ -124,7 +124,7 @@ func (d *EgressDirector) AddRouteToGateway(setName string, sourceIPs []string, d
 
 	// create iptables rule in mangle table PREROUTING chain to match src to ipset created and destination
 	// matching  destinationIP then fwmark the packets
-	ruleSpec := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
+	ruleSpec := []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
 	hasRule, err := d.ipt.Exists("mangle", "PREROUTING", ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
@@ -138,7 +138,7 @@ func (d *EgressDirector) AddRouteToGateway(setName string, sourceIPs []string, d
 	}
 	glog.Infof("iptables rule in mangle table PREROUTING chain to match src to ipset")
 
-	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	ruleSpec = []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
 	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in BYPASS_CNI_MASQURADE chain of nat table to bypass the CNI masqurade" + err.Error())
@@ -200,7 +200,7 @@ func (d *EgressDirector) DeleteRouteToGateway(setName string, destinationIP, egr
 
 	// create iptables rule in mangle table PREROUTING chain to match src to ipset created and destination
 	// matching  destinationIP then fwmark the packets
-	ruleSpec := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
+	ruleSpec := []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
 	hasRule, err := d.ipt.Exists("mangle", "PREROUTING", ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
@@ -213,7 +213,7 @@ func (d *EgressDirector) DeleteRouteToGateway(setName string, destinationIP, egr
 		glog.Infof("deleted rule in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP")
 	}
 
-	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	ruleSpec = []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
 	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in BYPASS_CNI_MASQURADE chain of nat table to bypass the CNI masqurade" + err.Error())
@@ -245,11 +245,11 @@ func (d *EgressDirector) DeleteRouteToGateway(setName string, destinationIP, egr
 	return nil
 }
 
-func (d *EgressDirector) ClaerStaleRouteToGateway(setName string, destinationIP, egressGateway string) error {
+func (d *EgressDirector) ClearStaleRouteToGateway(setName string, destinationIP, egressGateway string) error {
 
 	// create iptables rule in mangle table PREROUTING chain to match src to ipset created and destination
 	// matching  destinationIP then fwmark the packets
-	ruleSpec := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
+	ruleSpec := []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "MARK", "--set-mark", staticEgressIPFWMARK}
 	hasRule, err := d.ipt.Exists("mangle", "PREROUTING", ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP" + err.Error())
@@ -262,7 +262,7 @@ func (d *EgressDirector) ClaerStaleRouteToGateway(setName string, destinationIP,
 		glog.Infof("deleted rule in PREROUTING chain of mangle table to fwmark egress traffic that needs static egress IP")
 	}
 
-	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	ruleSpec = []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
 	hasRule, err = d.ipt.Exists("nat", bypassCNIMasquradeChainName, ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in BYPASS_CNI_MASQURADE chain of nat table to bypass the CNI masqurade" + err.Error())

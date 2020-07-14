@@ -95,7 +95,7 @@ func (gateway *EgressGateway) AddStaticIptablesRule(setName string, sourceIPs []
 	}
 	glog.Infof("Added ips %v to the ipset name: %s", sourceIPs, setName)
 
-	ruleSpec := []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	ruleSpec := []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
 	hasRule, err := gateway.ipt.Exists("filter", egressGatewayFWChainName, ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in " + egressGatewayFWChainName + " chain of filter table" + err.Error())
@@ -142,7 +142,7 @@ func (gateway *EgressGateway) DeleteStaticIptablesRule(setName string, destinati
 	}
 
 	// delete rule in FORWARD chain of filter table
-	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	ruleSpec = []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
 	hasRule, err := gateway.ipt.Exists("filter", egressGatewayFWChainName, ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in " + egressGatewayFWChainName + " chain of filter table" + err.Error())
@@ -176,7 +176,7 @@ func (gateway *EgressGateway) ClearStaticIptablesRule(setName string, destinatio
 	}
 
 	// delete rule in FORWARD chain of filter table
-	ruleSpec = []string{"-m", "set", "--set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
+	ruleSpec = []string{"-m", "set", "--match-set", setName, "src", "-d", destinationIP, "-j", "ACCEPT"}
 	hasRule, err := gateway.ipt.Exists("filter", egressGatewayFWChainName, ruleSpec...)
 	if err != nil {
 		return errors.New("Failed to verify rule exists in " + egressGatewayFWChainName + " chain of filter table" + err.Error())
