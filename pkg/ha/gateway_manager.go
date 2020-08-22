@@ -204,7 +204,7 @@ func (manager *GatewayManager) chooseGatewayNode(staticEgressIP *egressipAPI.Sta
 		}
 	}
 
-	readyNodes := make([]*v1core.Node, 0)
+	readyNodes := make([]v1core.Node, 0)
 	for _, node := range nodes.Items {
 
 		_, isMaster := node.Labels[nodeRoleMasterLabel]
@@ -220,7 +220,7 @@ func (manager *GatewayManager) chooseGatewayNode(staticEgressIP *egressipAPI.Sta
 			}
 		}
 		if nodeReady {
-			readyNodes = append(readyNodes, &node)
+			readyNodes = append(readyNodes, node)
 		} else {
 			log.Printf("Node: %s is not ready so skipping it from the list nodes for selecting gateway", node.Name)
 		}
@@ -228,7 +228,7 @@ func (manager *GatewayManager) chooseGatewayNode(staticEgressIP *egressipAPI.Sta
 
 	if len(readyNodes) > 0 {
 		log.Printf("Selecting node: %s as gateway", readyNodes[0])
-		nodeIP, err := utils.GetNodeIP(readyNodes[0])
+		nodeIP, err := utils.GetNodeIP(&readyNodes[0])
 		if err != nil {
 			return "", "", errors.New("Failed to get node IP to allocate gateway for static egress IP: " + staticEgressIP.Name + " due to " + err.Error())
 		}
