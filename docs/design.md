@@ -19,7 +19,7 @@ Here is what configurations done by `kube-static-egress-ip` pod running on the n
 
 ### policy based routing
 
-Since only selected pod's egress traffic (as determined by the `staticegressip` custom resource) required static egress IP it is expected that routing changes needed to redirect the traffic are exclusivley applied only to those pods. To achive that `kube-static-egress-ip` uses Linix policy based routing in followin manner. 
+Since only selected pod's egress traffic (as determined by the `staticegressip` custom resource) required static egress IP it is expected that routing changes needed to redirect the traffic are exclusivley applied only to those pods. To achive that `kube-static-egress-ip` uses Linix policy based routing in following manner. 
 
 - a custom routing table named `kube-static-egress-ip` with ID 99 is created the host network 
 - all the traffic from the pods running on the node that needs static egress IP are FWMARK'ed using iptable's mangle table and PREROUTING chain. Packets are marked with with `1000`
